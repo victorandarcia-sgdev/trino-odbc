@@ -48,17 +48,59 @@ std::string refreshClientCredAuth(ClientCredAuthParams& params) {
     curl_easy_setopt(params.curl, CURLOPT_HTTPHEADER, nullptr);
 
     // Obtain the OIDC Discovery data.
+    WriteLog(LL_DEBUG,
+             "  OIDC discovery URL: " + *params.oidcDiscoveryUrl);
     curl_easy_setopt(
         params.curl, CURLOPT_URL, params.oidcDiscoveryUrl->c_str());
     CURLcode res1 = curl_easy_perform(params.curl);
-    WriteLog(LL_DEBUG, "  OIDC discovery CURLcode response was: " + std::to_string(res1));
-    WriteLog(LL_TRACE,"  OIDC discovery response: " + *params.responseData);
+    WriteLog(LL_DEBUG,
+             "  OIDC discovery CURLcode response was: " +
+                 std::to_string(res1));
+    WriteLog(LL_DEBUG,
+             "  OIDC discovery response: " + *params.responseData);
 
-    json discoveryData = json::parse(*params.responseData);
+    if (res1 != CURLE_OK) {
+      WriteLog(LL_ERROR,
+               "  ERROR: OIDC discovery request failed with CURLcode: " +
+                   std::to_string(res1));
+      return "";
+    }
+
+    json discoveryData;
+    try {
+      discoveryData = json::parse(*params.responseData);
+    } catch (const json::parse_error& e) {
+      WriteLog(LL_ERROR,
+               "  ERROR: Failed to parse OIDC discovery response as JSON: " +
+                   std::string(e.what()) +
+                   " | Raw response: " + *params.responseData);
+      return "";
+    }
+
+    if (discoveryData.contains("error")) {
+      std::string errorMsg = discoveryData["error"].is_string()
+                                 ? discoveryData["error"].get<std::string>()
+                                 : discoveryData["error"].dump();
+      WriteLog(LL_ERROR,
+               "  ERROR: OIDC discovery endpoint returned error: " +
+                   errorMsg +
+                   " | URL was: " + *params.oidcDiscoveryUrl);
+      return "";
+    }
+
+    if (!discoveryData.contains("token_endpoint") ||
+        discoveryData["token_endpoint"].is_null()) {
+      WriteLog(LL_ERROR,
+               "  ERROR: OIDC discovery response missing 'token_endpoint'. "
+               "Verify the discovery URL includes the full path (e.g., "
+               "https://host/realms/REALM/.well-known/openid-configuration). "
+               "URL was: " + *params.oidcDiscoveryUrl);
+      return "";
+    }
 
     // Obtain the token endpoint that provides tokens in exchange for
     // client credentials.
-    tokenEndpoint = discoveryData["token_endpoint"];
+    tokenEndpoint = discoveryData["token_endpoint"].get<std::string>();
     WriteLog(LL_TRACE, "  OIDC token Endpoint Was: " + tokenEndpoint);
   } else {
     tokenEndpoint = *params.tokenEndpoint;

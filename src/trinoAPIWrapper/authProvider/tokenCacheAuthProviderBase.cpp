@@ -1,3 +1,5 @@
+#include <stdexcept>
+
 #include "tokenCacheAuthProviderBase.hpp"
 
 TokenCacheAuthProviderBase::TokenCacheAuthProviderBase(
@@ -28,10 +30,23 @@ void TokenCacheAuthProviderBase::refresh(
     std::map<std::string, std::string>* responseHeaderData) {
   applyTokenIfNotExpired();
 
+  // If the token is not expired after applying from cache,
+  // we don't need to obtain a new one.
+  if (not this->tokenCache->isExpired()) {
+    return;
+  }
+
   // Actually obtain the access token. This function is pure virtual,
   // so subclasses must implement it.
   std::string accessToken =
       this->obtainAccessToken(curl, responseData, responseHeaderData);
+
+  if (accessToken.empty()) {
+    throw std::runtime_error(
+        "Authentication failed: unable to obtain access token. "
+        "Check the OIDC discovery URL and credentials in the "
+        "connection string.");
+  }
 
   // Cache the token
   this->cacheToken(accessToken);

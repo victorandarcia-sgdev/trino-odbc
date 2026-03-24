@@ -45,7 +45,6 @@ TEST_F(GetInfoTest, GetTrinoDBMSName) {
   std::string dbmsName(buf, buf + StrLen_or_IndPtr);
   ASSERT_EQ(dbmsName, std::string("Trino"));
 }
-
 TEST_F(GetInfoTest, GetTrinoDBMSVersion) {
   unsigned char buf[16];
   // Put some nonsense into the char array as a test.
@@ -55,24 +54,11 @@ TEST_F(GetInfoTest, GetTrinoDBMSVersion) {
   SQLRETURN ret =
       SQLGetInfo(this->hDbc, SQL_DBMS_VER, buf, bufferLen, &StrLen_or_IndPtr);
 
-  // The format of the version string is `##.##.#### <optional version>`
-  // Our implementation should return, for example, `00.00.0001 488`
-  // where we have a product-specific version string suffix on the
-  // version string. The actual Trino version doesn't fit in the
-  // mandatory DBMS version syntax prescribed by ODBC.
-  // The result is a string 14 characters long.
-  ASSERT_EQ(StrLen_or_IndPtr, 14);
+  // SQL_DBMS_VER now returns a static version string to avoid
+  // triggering network calls during early connection setup.
+  // The format is ##.##.#### as required by the ODBC spec.
+  ASSERT_EQ(StrLen_or_IndPtr, 10);
 
-  // We can use the returned length to construct a proper string
-  // from the char array to do this comparison.
   std::string dbmsVers(buf, buf + StrLen_or_IndPtr);
-  std::string firstPart = dbmsVers.substr(0, 10);
-  ASSERT_EQ(firstPart, std::string("00.00.0001"));
-
-  // We can parse the server version and assert that it is a three-digit
-  // integer. We don't want to assert/mandate a specific server version
-  // though.
-  std::string secondPart = dbmsVers.substr(11);
-  int trinoServerVersion = std::atoi(secondPart.c_str());
-  ASSERT_GE(trinoServerVersion, 100);
+  ASSERT_EQ(dbmsVers, std::string("00.00.0001"));
 }

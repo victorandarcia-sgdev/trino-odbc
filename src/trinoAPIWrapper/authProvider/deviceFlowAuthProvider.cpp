@@ -41,9 +41,21 @@ std::string refreshDeviceCredAuth(ClientCredAuthParams& params) {
   WriteLog(LL_DEBUG,
            "  OIDC discovery URL: " + *params.oidcDiscoveryUrl);
   curl_easy_setopt(params.curl, CURLOPT_URL, params.oidcDiscoveryUrl->c_str());
-  CURLcode res1 = curl_easy_perform(params.curl);
+ CURLcode res1 = curl_easy_perform(params.curl);
+  
+  long httpCode = 0;
+  curl_easy_getinfo(params.curl, CURLINFO_RESPONSE_CODE, &httpCode);
+  
+  char* effectiveUrl = nullptr;
+  curl_easy_getinfo(params.curl, CURLINFO_EFFECTIVE_URL, &effectiveUrl);
+  
   WriteLog(LL_DEBUG,
            "  OIDC discovery CURLcode response was: " + std::to_string(res1));
+  WriteLog(LL_DEBUG,
+           "  OIDC discovery HTTP status code: " + std::to_string(httpCode));
+  WriteLog(LL_DEBUG,
+           "  OIDC discovery effective URL: " + 
+               std::string(effectiveUrl ? effectiveUrl : "null"));
   WriteLog(LL_DEBUG,
            "  OIDC discovery response: " + *params.responseData);
 

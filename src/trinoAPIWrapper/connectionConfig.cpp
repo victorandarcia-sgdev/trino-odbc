@@ -166,6 +166,17 @@ curlSetup:
   // how it was used before.
   curl_easy_setopt(this->curl, CURLOPT_HTTPGET, true);
 
+  
+  // This clears any previously set POST body,
+  // ensuring the request is actually sent as GET.
+  // Without this, libcurl sees the old POSTFIELDS
+  // and sends POST even though HTTPGET was set.
+  curl_easy_setopt(this->curl, CURLOPT_POSTFIELDS, nullptr);
+
+
+  // Also reset any custom request method (DELETE, etc.)
+  curl_easy_setopt(this->curl, CURLOPT_CUSTOMREQUEST, nullptr);
+
   // Set up any required headers if needed.
   if (this->authConfigPtr->headers.size() > 0) {
     struct curl_slist* headers = nullptr;

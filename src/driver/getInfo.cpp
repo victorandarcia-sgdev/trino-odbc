@@ -57,13 +57,12 @@ _Success_(return == SQL_SUCCESS) SQLRETURN SQL_API
       break;
     }
     case SQL_DBMS_VER: { // 18
-      // What's the version of this DBMS? We have to query to find out.
-      // It must be of the form ##.##.####, but Trino doesn't do that.
-      // We're allow to append a product-specific version, so we will
-      // put the actual version there.
-      std::string rawServerVersion = connection->getServerVersion();
-      std::string versionString    = "00.00.0001 " + rawServerVersion;
-      writeNullTermStringToPtr(InfoValue, versionString, StringLengthPtr);
+      // Return a static version string. Do NOT query the server here
+      // because SQLGetInfo can be called early in the connection
+      // lifecycle (e.g., by Power BI) before authentication has
+      // completed. Triggering a network call here causes auth
+      // failures and hangs.
+      writeNullTermStringToPtr(InfoValue, "00.00.0001", StringLengthPtr);
       break;
     }
     case SQL_ACCESSIBLE_TABLES: { // 19

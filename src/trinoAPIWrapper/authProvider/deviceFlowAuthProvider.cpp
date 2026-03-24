@@ -38,20 +38,71 @@ struct ClientCredAuthParams {
 
 std::string refreshDeviceCredAuth(ClientCredAuthParams& params) {
   // Obtain the OIDC Discovery data.
+  WriteLog(LL_DEBUG,
+           "  OIDC discovery URL: " + *params.oidcDiscoveryUrl);
   curl_easy_setopt(params.curl, CURLOPT_URL, params.oidcDiscoveryUrl->c_str());
   CURLcode res1 = curl_easy_perform(params.curl);
   WriteLog(LL_DEBUG,
            "  OIDC discovery CURLcode response was: " + std::to_string(res1));
-  json discoveryData = json::parse(*params.responseData);
+  WriteLog(LL_DEBUG,
+           "  OIDC discovery response: " + *params.responseData);
+
+  if (res1 != CURLE_OK) {
+    WriteLog(LL_ERROR,
+             "  ERROR: OIDC discovery request failed with CURLcode: " +
+                 std::to_string(res1));
+    return "";
+  }
+
+  json discoveryData;
+  try {
+    discoveryData = json::parse(*params.responseData);
+  } catch (const json::parse_error& e) {
+    WriteLog(LL_ERROR,
+             "  ERROR: Failed to parse OIDC discovery response as JSON: " +
+                 std::string(e.what()) +
+                 " | Raw response: " + *params.responseData);
+    return "";
+  }
 
   WriteLog(LL_DEBUG,
-           "Full discovery response: " +
-               discoveryData.dump(4)); // Pretty-print with 4 spaces
+           "  Full discovery response: " + discoveryData.dump(4));
+
+  if (discoveryData.contains("error")) {
+    std::string errorMsg = discoveryData["error"].is_string()
+                               ? discoveryData["error"].get<std::string>()
+                               : discoveryData["error"].dump();
+    WriteLog(LL_ERROR,
+             "  ERROR: OIDC discovery endpoint returned error: " + errorMsg +
+                 " | URL was: " + *params.oidcDiscoveryUrl);
+    return "";
+  }
+
+  if (!discoveryData.contains("device_authorization_endpoint") ||
+      discoveryData["device_authorization_endpoint"].is_null()) {
+    WriteLog(LL_ERROR,
+             "  ERROR: OIDC discovery response missing "
+             "'device_authorization_endpoint'. Verify the discovery URL "
+             "includes the full path (e.g., "
+             "https://host/realms/REALM/.well-known/openid-configuration). "
+             "URL was: " + *params.oidcDiscoveryUrl);
+    return "";
+  }
+
+  if (!discoveryData.contains("token_endpoint") ||
+      discoveryData["token_endpoint"].is_null()) {
+    WriteLog(LL_ERROR,
+             "  ERROR: OIDC discovery response missing 'token_endpoint'. "
+             "URL was: " + *params.oidcDiscoveryUrl);
+    return "";
+  }
 
   // Obtain the token endpoint that provides tokens in exchange for
   // client credentials.
-  std::string deviceEndpoint = discoveryData["device_authorization_endpoint"];
-  std::string tokenEndpoint  = discoveryData["token_endpoint"];
+  std::string deviceEndpoint =
+      discoveryData["device_authorization_endpoint"].get<std::string>();
+  std::string tokenEndpoint =
+      discoveryData["token_endpoint"].get<std::string>();
   WriteLog(LL_TRACE,
            "  OIDC token Endpoint Was: " + tokenEndpoint +
                ", deviceEndpoint:" + deviceEndpoint);

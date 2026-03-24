@@ -40,12 +40,20 @@ std::string refreshClientCredAuth(ClientCredAuthParams& params) {
   std::string tokenEndpoint;
 
   if (params.tokenEndpoint->empty()) {
+    // Clear state before OIDC discovery
+    params.responseData->clear();
+    params.responseHeaderData->clear();
+    curl_easy_setopt(params.curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(params.curl, CURLOPT_POSTFIELDS, nullptr);
+    curl_easy_setopt(params.curl, CURLOPT_HTTPHEADER, nullptr);
+
     // Obtain the OIDC Discovery data.
     curl_easy_setopt(
         params.curl, CURLOPT_URL, params.oidcDiscoveryUrl->c_str());
     CURLcode res1 = curl_easy_perform(params.curl);
-    WriteLog(LL_DEBUG,
-             "  OIDC discovery CURLcode response was: " + std::to_string(res1));
+    WriteLog(LL_DEBUG, "  OIDC discovery CURLcode response was: " + std::to_string(res1));
+    WriteLog(LL_TRACE,"  OIDC discovery response: " + *params.responseData);
+
     json discoveryData = json::parse(*params.responseData);
 
     // Obtain the token endpoint that provides tokens in exchange for
@@ -54,8 +62,7 @@ std::string refreshClientCredAuth(ClientCredAuthParams& params) {
     WriteLog(LL_TRACE, "  OIDC token Endpoint Was: " + tokenEndpoint);
   } else {
     tokenEndpoint = *params.tokenEndpoint;
-    WriteLog(LL_TRACE,
-             "  Configured OIDC token Endpoint Was: " + tokenEndpoint);
+    WriteLog(LL_TRACE, "  Configured OIDC token Endpoint Was: " + tokenEndpoint);
   }
 
   // Construct a POST body for the token endpoint.
@@ -85,8 +92,9 @@ std::string refreshClientCredAuth(ClientCredAuthParams& params) {
       headers, "Content-Type: application/x-www-form-urlencoded");
   curl_easy_setopt(params.curl, CURLOPT_HTTPHEADER, headers);
   CURLcode res2 = curl_easy_perform(params.curl);
-  WriteLog(LL_DEBUG,
-           "  Token endpoint HTTP response code was: " + std::to_string(res2));
+  WriteLog(LL_DEBUG,  "  Token endpoint HTTP response code was: " + std::to_string(res2));
+  // Log the token response to help debug
+  WriteLog(LL_TRACE, " Token endpoint response: " + *params.responseData);
 
   // Read the token out of the response
   json responseJson = json::parse(*params.responseData);
@@ -97,6 +105,7 @@ std::string refreshClientCredAuth(ClientCredAuthParams& params) {
   }
   // This is the failure path, we didn't get a token.
   WriteLog(LL_ERROR, "  Client cred auth failed");
+  WriteLog(LL_ERROR, "  Response was: " + *params.responseData);
   return "";
 }
 
@@ -192,3 +201,4 @@ getClientCredAuthProvider(std::string hostname,
                                                   tokenEndpoint);
   }
 }
+ 

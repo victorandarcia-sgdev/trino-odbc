@@ -20,7 +20,7 @@ using json = nlohmann::json;
 
 
 int TOKEN_CACHE_JSON_INDENT     = 2;
-long long EXPIRY_GRACE_PERIOD_S = 60 * 10;
+long long EXPIRY_GRACE_PERIOD_S = 60 * 2; //2 min exp grace period
 
 
 TokenCacheEntry::TokenCacheEntry(std::string accessToken,

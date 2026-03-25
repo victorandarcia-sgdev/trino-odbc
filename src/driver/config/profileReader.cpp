@@ -46,8 +46,6 @@ DriverConfig readDriverConfigFromProfile(std::string dsn) {
   config.setGrantType(readFromPrivateProfile(dsn, "granttype"));
 
   std::string secretEncryptionLevel =
-
-  std::string secretEncryptionLevel =
       readFromPrivateProfile(dsn, "secretEncryptionLevel");
   std::string encryptedClientSecret =
       readFromPrivateProfile(dsn, "encryptedClientSecret");

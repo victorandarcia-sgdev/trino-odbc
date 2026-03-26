@@ -202,6 +202,14 @@ void TrinoQuery::post() {
 
   CURLcode res = curl_easy_perform(curl);
 
+  // Immediately reset CURL back to GET mode after POST.
+  // This prevents the poll loop from sending POST requests
+  // to Trino's nextUri which expects GET.
+  curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+  curl_easy_setopt(curl, CURLOPT_POST, 0L);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
+
   if (res != CURLE_OK) {
     WriteLog(LL_ERROR, std::string("CURL error: ") + curl_easy_strerror(res));
   }

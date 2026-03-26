@@ -16,6 +16,16 @@
 #include "../util/stringTrim.hpp"
 #include "../util/writeLog.hpp"
 
+static int curlDebugCallback(CURL* handle, curl_infotype type,
+                             char* data, size_t size, void* userptr) {
+  if (type == CURLINFO_TEXT) {
+    std::string msg(data, size);
+    // Remove trailing newline
+    if (!msg.empty() && msg.back() == '\n') msg.pop_back();
+    WriteLog(LL_DEBUG, "  CURL: " + msg);
+  }
+  return 0;
+}
 // How long should we poll between requests to Trino's nextUri?
 int API_POLL_INTERVAL_MS = 25;
 
@@ -221,22 +231,30 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     return;
   }
 
-CURL* curl    = this->connectionConfig->getCurl();
   int pollCount = 1;
   while (!this->completed) {
-    // Since we're reusing the curl handle, we need to clear any
-    // data returned from it. This is kind of ugly, but it is
-    // highly efficient.
     this->connectionConfig->responseData.clear();
     this->connectionConfig->responseHeaderData.clear();
-    // Reset to GET mode - the handle may still have POSTFIELDS
-    // set from the query POST in TrinoQuery::post()
-    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);
+
+    // Get a fully fresh CURL handle for each poll request
+    CURL* curl = this->connectionConfig->getCurl();
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
-    
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+    WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
+                       " | nextUri: " + this->nextUri);
+
     CURLcode res;
     res = curl_easy_perform(curl);
+
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    char* effectiveUrl = nullptr;
+    curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effectiveUrl);
+
+    WriteLog(LL_DEBUG, "  Poll result: CURLcode=" + std::to_string(res) +
+                       " HTTP=" + std::to_string(httpCode) +
+                       " URL=" + std::string(effectiveUrl ? effectiveUrl : "null"));
     UpdateStatus updateStatus;
     if (res == CURLE_OK) {
       updateStatus = updateSelfFromResponse();

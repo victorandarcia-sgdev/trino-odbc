@@ -166,7 +166,8 @@ curlSetup:
   // Let's say the standard state of curl is that the
   // handle is configured to run GET requests, no matter
   // how it was used before.
-  curl_easy_setopt(this->curl, CURLOPT_HTTPGET, true);
+  curl_easy_setopt(this->curl, CURLOPT_HTTPGET, 1L);
+  curl_easy_setopt(this->curl, CURLOPT_POST, 0L);
 
   
   // This clears any previously set POST body,

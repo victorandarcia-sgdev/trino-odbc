@@ -221,7 +221,7 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     return;
   }
 
-  CURL* curl    = this->connectionConfig->getCurl();
+CURL* curl    = this->connectionConfig->getCurl();
   int pollCount = 1;
   while (!this->completed) {
     // Since we're reusing the curl handle, we need to clear any
@@ -229,8 +229,12 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     // highly efficient.
     this->connectionConfig->responseData.clear();
     this->connectionConfig->responseHeaderData.clear();
+    // Reset to GET mode - the handle may still have POSTFIELDS
+    // set from the query POST in TrinoQuery::post()
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
-
+    
     CURLcode res;
     res = curl_easy_perform(curl);
     UpdateStatus updateStatus;

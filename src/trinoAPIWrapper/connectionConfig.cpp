@@ -184,9 +184,12 @@ curlSetup:
   if (this->authConfigPtr->headers.size() > 0) {
     struct curl_slist* headers = nullptr;
     for (const auto pair : this->authConfigPtr->headers) {
+      WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " + pair.second.substr(0, 50));
       std::string nextHeader = pair.first + ": " + pair.second;
       headers                = curl_slist_append(headers, nextHeader.c_str());
     }
+    headers = curl_slist_append(headers, "Content-Length: 0");
+    headers = curl_slist_append(headers, "Content-Type:");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   }
 

@@ -236,6 +236,11 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     UpdateStatus updateStatus;
     if (res == CURLE_OK) {
       updateStatus = updateSelfFromResponse();
+    } else {
+      WriteLog(LL_ERROR,
+               "  Poll CURL error: " + std::string(curl_easy_strerror(res)) +
+                   " (code " + std::to_string(res) + ")" +
+                   " | nextUri: " + this->nextUri);
     }
 
     if (mode == JustOnce) {

@@ -137,6 +137,8 @@ CURL* ConnectionConfig::getCurl() {
     this->curl = curl_easy_init();
     // We always want to use SSL.
     curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA| CURLSSLOPT_NO_REVOKE);
+    curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 1L);
+    curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 1L);
     // We want to save the response body in a string using a callback.
     curl_easy_setopt(this->curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, &(this->responseData));

@@ -9,6 +9,7 @@ class AuthConfig {
     // Any headers that must be included on all requests go here.
     std::map<std::string, std::string> headers = {
         {"X-Trino-Source", "TrinoODBCDriver"},
+        {"X-Trino-User", "andarciav"},
     };
     std::string hostname;
     unsigned short port;

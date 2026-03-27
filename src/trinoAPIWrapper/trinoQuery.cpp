@@ -240,6 +240,7 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
   }
 
   int pollCount = 1;
+  struct curl_slist* pollHeaders = nullptr;
   while (!this->completed) {
     this->connectionConfig->responseData.clear();
     this->connectionConfig->responseHeaderData.clear();
@@ -251,7 +252,16 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
     WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
                        " | nextUri: " + this->nextUri);
-
+    struct curl_slist* pollHeaders = nullptr;
+    WriteLog(LL_DEBUG, "Resetting Poll Headers");
+    for (const auto& pair : this->connectionConfig->authConfigPtr->headers) {
+      std::string h = pair.first + ": " + pair.second;
+      pollHeaders = curl_slist_append(pollHeaders, h.c_str());
+    }
+    pollHeaders = curl_slist_append(pollHeaders, "Content-Length: 0");
+    pollHeaders = curl_slist_append(pollHeaders, "Content-Type:");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, pollHeaders);
+    WriteLog(LL_DEBUG, "  Poll headers: " + std::to_string(pollHeaders) + " |");
     CURLcode res;
     res = curl_easy_perform(curl);
 
@@ -294,6 +304,10 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     } else {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(pollCount * API_POLL_INTERVAL_MS));
+    }
+    if (pollHeaders) {
+      curl_slist_free_all(pollHeaders);
+      pollHeaders = nullptr;
     }
     pollCount++;
   }

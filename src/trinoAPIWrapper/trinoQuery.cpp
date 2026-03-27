@@ -240,47 +240,54 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
   }
 
   int pollCount = 1;
-  struct curl_slist* pollHeaders = nullptr;
   while (!this->completed) {
     this->connectionConfig->responseData.clear();
     this->connectionConfig->responseHeaderData.clear();
 
-    // Get a fully fresh CURL handle for each poll request
     CURL* curl = this->connectionConfig->getCurl();
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+
     WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
                        " | nextUri: " + this->nextUri);
+
+    // Build poll-specific headers: auth headers + strip Content-Type
     struct curl_slist* pollHeaders = nullptr;
-    WriteLog(LL_DEBUG, " Resetting Poll Headers");
     for (const auto& pair : this->connectionConfig->getAuthHeaders()) {
       std::string h = pair.first + ": " + pair.second;
       pollHeaders = curl_slist_append(pollHeaders, h.c_str());
     }
-    pollHeaders = curl_slist_append(pollHeaders, "Content-Length: 0");
     pollHeaders = curl_slist_append(pollHeaders, "Content-Type:");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, pollHeaders);
-    WriteLog(LL_DEBUG, " Poll Headersset for GET Request");
-    CURLcode res;
-    res = curl_easy_perform(curl);
+
+    CURLcode res = curl_easy_perform(curl);
 
     long httpCode = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-    char* effectiveUrl = nullptr;
-    curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effectiveUrl);
 
     WriteLog(LL_DEBUG, "  Poll result: CURLcode=" + std::to_string(res) +
-                       " HTTP=" + std::to_string(httpCode) +
-                       " URL=" + std::string(effectiveUrl ? effectiveUrl : "null"));
+                       " HTTP=" + std::to_string(httpCode));
+
+    // Log response body on non-200 for debugging
+    if (res == CURLE_OK && httpCode != 200) {
+      WriteLog(LL_ERROR, "  Poll non-200 response body: " +
+                         this->connectionConfig->responseData);
+    }
+
     UpdateStatus updateStatus;
-    if (res == CURLE_OK) {
+    if (res == CURLE_OK && httpCode == 200) {
       updateStatus = updateSelfFromResponse();
-    } else {
+    } else if (res != CURLE_OK) {
       WriteLog(LL_ERROR,
                "  Poll CURL error: " + std::string(curl_easy_strerror(res)) +
-                   " (code " + std::to_string(res) + ")" +
-                   " | nextUri: " + this->nextUri);
+                   " (code " + std::to_string(res) + ")");
+    }
+
+    // Free poll headers
+    if (pollHeaders) {
+      curl_slist_free_all(pollHeaders);
+      pollHeaders = nullptr;
     }
 
     if (mode == JustOnce) {
@@ -290,29 +297,20 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
       break;
     }
     if (mode == UntilNewData and not this->completed) {
-      // If it's not complete, only stop polling if we got new row data.
       if (updateStatus.gotRowData) {
         break;
       }
     }
-    //  If we learned something from the last request, reset the poll counter
-    //  so we can try to read more data. If we didn't learn anything from
-    //  the last request, we should sleep for a bit to give the server some
-    //  time to get ready for the next request.
+
     if (updateStatus.gotRowData or updateStatus.gotColumnInfo) {
       pollCount = 0;
     } else {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(pollCount * API_POLL_INTERVAL_MS));
     }
-    if (pollHeaders) {
-      curl_slist_free_all(pollHeaders);
-      pollHeaders = nullptr;
-    }
     pollCount++;
   }
 }
-
 /*
  Canceling a query causes it to gracefully stop.
  It may return a few more rows before finishing up,

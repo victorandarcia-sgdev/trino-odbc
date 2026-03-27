@@ -261,7 +261,7 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     pollHeaders = curl_slist_append(pollHeaders, "Content-Length: 0");
     pollHeaders = curl_slist_append(pollHeaders, "Content-Type:");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, pollHeaders);
-    WriteLog(LL_DEBUG, "  Poll headers: " + std::to_string(pollHeaders) + " |");
+    WriteLog(LL_DEBUG, "Sending new Poll Headers");
     CURLcode res;
     res = curl_easy_perform(curl);
 

@@ -188,8 +188,6 @@ curlSetup:
       std::string nextHeader = pair.first + ": " + pair.second;
       headers                = curl_slist_append(headers, nextHeader.c_str());
     }
-    headers = curl_slist_append(headers, "Content-Length: 0");
-    headers = curl_slist_append(headers, "Content-Type:");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   }
 

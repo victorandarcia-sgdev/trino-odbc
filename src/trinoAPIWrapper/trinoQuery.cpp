@@ -253,15 +253,15 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
                        " | nextUri: " + this->nextUri);
     struct curl_slist* pollHeaders = nullptr;
-    WriteLog(LL_DEBUG, "Resetting Poll Headers");
-    for (const auto& pair : this->connectionConfig->authConfigPtr->headers) {
+    WriteLog(LL_DEBUG, " Resetting Poll Headers");
+    for (const auto& pair : this->connectionConfig->getAuthHeaders()) {
       std::string h = pair.first + ": " + pair.second;
       pollHeaders = curl_slist_append(pollHeaders, h.c_str());
     }
     pollHeaders = curl_slist_append(pollHeaders, "Content-Length: 0");
     pollHeaders = curl_slist_append(pollHeaders, "Content-Type:");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, pollHeaders);
-    WriteLog(LL_DEBUG, "Sending new Poll Headers");
+    WriteLog(LL_DEBUG, " Poll Headersset for GET Request");
     CURLcode res;
     res = curl_easy_perform(curl);
 

@@ -56,4 +56,7 @@ class ConnectionConfig {
     // manipulated external to the ConnectionConfig object
     std::string responseData;
     std::map<std::string, std::string> responseHeaderData;
+    std::map<std::string, std::string> getAuthHeaders() {
+      return this->authConfigPtr->headers;
+    }
 };

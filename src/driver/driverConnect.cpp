@@ -63,6 +63,22 @@ SQLRETURN SQL_API SQLDriverConnect(SQLHDBC ConnectionHandle,
              "  An explicit DSN was not provided to SQLDriverConnect");
   }
 
+  // Map UID/PWD to clientId/clientSecret for tools that pass
+  // credentials using the standard ODBC UID and PWD keys.
+  // This is how PBI Report Server passes stored credentials.
+  if (kvps.count("uid") && !kvps.count("clientid") &&
+      !kvps.count("clientId")) {
+    WriteLog(LL_DEBUG,
+             "  Mapping UID to clientId for OIDC authentication");
+    kvps["clientId"] = kvps.at("uid");
+  }
+  if (kvps.count("pwd") && !kvps.count("clientsecret") &&
+      !kvps.count("clientSecret")) {
+    WriteLog(LL_DEBUG,
+             "  Mapping PWD to clientSecret for OIDC authentication");
+    kvps["clientSecret"] = kvps.at("pwd");
+  }
+
   WriteLog(LL_TRACE, "  Constructing driver config");
   DriverConfig config = driverConfigFromKVPs(kvps);
 

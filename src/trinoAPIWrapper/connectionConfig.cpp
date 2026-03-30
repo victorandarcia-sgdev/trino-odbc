@@ -8,6 +8,7 @@
 #include "authProvider/deviceFlowAuthProvider.hpp"
 #include "authProvider/externalAuthProvider.hpp"
 #include "authProvider/noAuthProvider.hpp"
+#include "authProvider/oidcAuthCodeProvider.hpp"
 
 
 using json = nlohmann::json;
@@ -43,6 +44,60 @@ curlHeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
   return nitems * size;
 }
 
+/**
+ * Determines whether the current process can display interactive UI.
+ *
+ * Returns false when running as:
+ * - A Windows Service (Power BI Report Server, SSRS, SQL Agent)
+ * - A non-interactive session (scheduled tasks, system accounts)
+ *
+ * Returns true when running as:
+ * - Power BI Desktop
+ * - Excel
+ * - DBeaver
+ * - Any interactive desktop application
+ */
+static bool canDisplayInteractiveUI() {
+  // Check if the process window station allows user interaction.
+  HWINSTA hWinStation = GetProcessWindowStation();
+  if (hWinStation != nullptr) {
+    USEROBJECTFLAGS uof = {};
+    if (GetUserObjectInformation(
+            hWinStation, UOI_FLAGS, &uof, sizeof(uof), nullptr)) {
+      if (!(uof.dwFlags & WSF_VISIBLE)) {
+        WriteLog(LL_DEBUG,
+                 "  canDisplayInteractiveUI: Window station not visible "
+                 "(service/non-interactive)");
+        return false;
+      }
+    }
+  }
+
+  // Services run in session 0 on modern Windows (Vista+).
+  DWORD sessionId = 0;
+  if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId)) {
+    if (sessionId == 0) {
+      WriteLog(LL_DEBUG,
+               "  canDisplayInteractiveUI: Session 0 detected (service)");
+      return false;
+    }
+  }
+
+  // Check that we can access an input desktop.
+  HDESK hDesktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+  if (hDesktop == nullptr) {
+    WriteLog(LL_DEBUG,
+             "  canDisplayInteractiveUI: Cannot open input desktop "
+             "(non-interactive)");
+    return false;
+  }
+  CloseDesktop(hDesktop);
+
+  WriteLog(LL_DEBUG,
+           "  canDisplayInteractiveUI: Interactive session confirmed");
+  return true;
+}
+
 ConnectionConfig::ConnectionConfig(std::string hostname,
                                    unsigned short port,
                                    ApiAuthMethod authMethod,
@@ -52,7 +107,9 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                    std::string clientSecret,
                                    std::string oidcScope,
                                    std::string grantType,
-                                   std::string tokenEndpoint) {
+                                   std::string tokenEndpoint,
+                                   std::string redirectUri,
+                                   unsigned short callbackPort) {
 
   this->hostname       = hostname;
   this->port           = port;
@@ -97,6 +154,79 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                                       clientId,
                                                       clientSecret,
                                                       oidcScope);
+      break;
+    }
+    case AM_OIDC_AUTH_CODE: {
+      this->authConfigPtr = getOidcAuthCodeProvider(hostname,
+                                                     port,
+                                                     connectionName,
+                                                     oidcDiscoveryUrl,
+                                                     clientId,
+                                                     clientSecret,
+                                                     oidcScope,
+                                                     tokenEndpoint,
+                                                     redirectUri,
+                                                     callbackPort);
+      break;
+    }
+    case AM_OIDC_AUTO: {
+      // Auto-detect the best authentication flow based on the
+      // execution environment and available credentials.
+      bool hasClientSecret = !clientSecret.empty();
+      bool canShowUI       = canDisplayInteractiveUI();
+
+      if (hasClientSecret && !canShowUI) {
+        // Headless with credentials → client credentials flow.
+        // This is the typical PBI Report Server scenario.
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: Headless environment detected with client "
+                 "secret present. Using Client Credentials flow.");
+        this->authConfigPtr = getClientCredAuthProvider(hostname,
+                                                        port,
+                                                        connectionName,
+                                                        oidcDiscoveryUrl,
+                                                        clientId,
+                                                        clientSecret,
+                                                        oidcScope,
+                                                        grantType,
+                                                        tokenEndpoint);
+      } else if (canShowUI) {
+        // Interactive session → auth code + PKCE flow.
+        // This is the typical PBI Desktop / Excel scenario.
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: Interactive environment detected. "
+                 "Using Authorization Code + PKCE flow.");
+        this->authConfigPtr = getOidcAuthCodeProvider(hostname,
+                                                       port,
+                                                       connectionName,
+                                                       oidcDiscoveryUrl,
+                                                       clientId,
+                                                       clientSecret,
+                                                       oidcScope,
+                                                       tokenEndpoint,
+                                                       redirectUri,
+                                                       callbackPort);
+      } else if (hasClientSecret) {
+        // Fallback: no UI but has credentials.
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: No UI available but client secret present. "
+                 "Using Client Credentials flow.");
+        this->authConfigPtr = getClientCredAuthProvider(hostname,
+                                                        port,
+                                                        connectionName,
+                                                        oidcDiscoveryUrl,
+                                                        clientId,
+                                                        clientSecret,
+                                                        oidcScope,
+                                                        grantType,
+                                                        tokenEndpoint);
+      } else {
+        WriteLog(LL_ERROR,
+                 "  ERROR: OIDC Auto mode cannot determine auth strategy. "
+                 "No client secret for headless mode and no UI available "
+                 "for interactive mode. Provide a clientSecret or run in "
+                 "an interactive session.");
+      }
       break;
     }
 

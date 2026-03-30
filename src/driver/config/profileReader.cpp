@@ -44,6 +44,8 @@ DriverConfig readDriverConfigFromProfile(std::string dsn) {
   config.setOidcScope(readFromPrivateProfile(dsn, "oidcScope"));
   config.setTokenEndpoint(readFromPrivateProfile(dsn, "tokenendpoint"));
   config.setGrantType(readFromPrivateProfile(dsn, "granttype"));
+  config.setRedirectUri(readFromPrivateProfile(dsn, "redirectUri"));
+  config.setCallbackPort(readFromPrivateProfile(dsn, "callbackPort"));
 
   std::string secretEncryptionLevel =
       readFromPrivateProfile(dsn, "secretEncryptionLevel");

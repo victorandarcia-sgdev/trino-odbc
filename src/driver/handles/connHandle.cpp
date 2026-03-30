@@ -40,7 +40,9 @@ void Connection::configure(DriverConfig config) {
                                                 config.getClientSecret(),
                                                 config.getOidcScope(),
                                                 config.getGrantType(),
-                                                config.getTokenEndpoint());
+                                                config.getTokenEndpoint(),
+                                                config.getRedirectUri(),
+                                                config.getCallbackPortNum());
 }
 
 void Connection::setError(ErrorInfo errorInfo) {

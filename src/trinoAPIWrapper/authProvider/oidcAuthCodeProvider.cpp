@@ -1,10 +1,5 @@
-// winsock2.h must be included before windows.h (which comes in via
-// windowsLean.hpp) to prevent redefinition errors between winsock.h
-// and winsock2.h. Defining _WINSOCKAPI_ prevents windows.h from
-// pulling in the older winsock.h.
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_
-#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
 #include "oidcAuthCodeProvider.hpp"
 
@@ -13,10 +8,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
-
-// Must come before any header that might include windows.h
-#include <winsock2.h>
-#include <ws2tcpip.h>
 
 #include "nlohmann/json.hpp"
 
@@ -28,10 +19,6 @@
 #include "tokenCacheAuthProviderBase.hpp"
 #include "tokens/tokenCache.hpp"
 
-// windowsLean.hpp includes windows.h — safe now because we already
-// included winsock2.h above and defined _WINSOCKAPI_ to prevent
-// the old winsock.h from being pulled in.
-#include "../../util/windowsLean.hpp"
 #include <wincrypt.h>
 
 #pragma comment(lib, "ws2_32.lib")

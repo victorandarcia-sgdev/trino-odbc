@@ -652,7 +652,8 @@ class OidcAuthCodeAuthConfig : public TokenCacheAuthProviderBase {
         std::map<std::string, std::string>* responseHeaderData) {
 
       if (!configuredTokenEndpoint.empty()) {
-        return configuredTokenEndpoint;
+        resolvedTokenEndpoint = configuredTokenEndpoint;
+        return resolvedTokenEndpoint;
       }
 
       if (!resolvedTokenEndpoint.empty()) {
@@ -660,15 +661,20 @@ class OidcAuthCodeAuthConfig : public TokenCacheAuthProviderBase {
       }
 
       // Perform OIDC discovery to find endpoints.
-      OidcEndpoints endpoints = discoverOidcEndpoints(
-          curl, oidcDiscoveryUrl, responseData, responseHeaderData);
+      if (!oidcDiscoveryUrl.empty()) {
+        OidcEndpoints endpoints = discoverOidcEndpoints(
+            curl, oidcDiscoveryUrl, responseData, responseHeaderData);
 
-      resolvedAuthorizationEndpoint = endpoints.authorizationEndpoint;
-      resolvedTokenEndpoint         = endpoints.tokenEndpoint;
+        if (!endpoints.tokenEndpoint.empty()) {
+          resolvedTokenEndpoint = endpoints.tokenEndpoint;
+        }
+        if (!endpoints.authorizationEndpoint.empty()) {
+          resolvedAuthorizationEndpoint = endpoints.authorizationEndpoint;
+        }
+      }
 
       return resolvedTokenEndpoint;
     }
-
     std::string resolveAuthorizationEndpoint(
         CURL* curl,
         std::string* responseData,
@@ -678,11 +684,54 @@ class OidcAuthCodeAuthConfig : public TokenCacheAuthProviderBase {
         return resolvedAuthorizationEndpoint;
       }
 
-      // This will trigger discovery and populate both endpoints.
+      // Try OIDC discovery first — this populates both endpoints.
       resolveTokenEndpoint(curl, responseData, responseHeaderData);
-      return resolvedAuthorizationEndpoint;
-    }
 
+      if (!resolvedAuthorizationEndpoint.empty()) {
+        return resolvedAuthorizationEndpoint;
+      }
+
+      std::string tokenEp = resolvedTokenEndpoint;
+      if (tokenEp.empty()) {
+        tokenEp = configuredTokenEndpoint;
+      }
+
+      if (!tokenEp.empty()) {
+        // Try replacing "/token" with "/auth" at the end of the URL.
+        // Keycloak:  .../protocol/openid-connect/token → .../protocol/openid-connect/auth
+        // Azure AD:  .../oauth2/v2.0/token → .../oauth2/v2.0/authorize
+        std::string suffix = "/token";
+        auto pos = tokenEp.rfind(suffix);
+        if (pos != std::string::npos &&
+            pos == tokenEp.length() - suffix.length()) {
+          // Keycloak pattern: /token → /auth
+          resolvedAuthorizationEndpoint =
+              tokenEp.substr(0, pos) + "/auth";
+          WriteLog(LL_INFO,
+                   "  Derived authorization endpoint from token endpoint: " +
+                       resolvedAuthorizationEndpoint);
+          return resolvedAuthorizationEndpoint;
+        }
+
+        // Azure AD pattern: /token → /authorize
+        suffix = "/token";
+        pos = tokenEp.rfind(suffix);
+        if (pos != std::string::npos) {
+          resolvedAuthorizationEndpoint =
+              tokenEp.substr(0, pos) + "/authorize";
+          WriteLog(LL_INFO,
+                   "  Derived authorization endpoint (Azure pattern): " +
+                       resolvedAuthorizationEndpoint);
+          return resolvedAuthorizationEndpoint;
+        }
+      }
+
+      WriteLog(LL_ERROR,
+               "  ERROR: Cannot determine authorization endpoint. "
+               "OIDC discovery failed and no token endpoint available "
+               "to derive from.");
+      return "";
+    }
     std::string attemptRefreshToken(
         CURL* curl,
         std::string* responseData,

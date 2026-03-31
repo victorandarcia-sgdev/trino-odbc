@@ -27,6 +27,8 @@ constexpr int ID_STATIC_CLIENT_SECRET = 114;
 constexpr int ID_STATIC_OIDC_SCOPE    = 115;
 constexpr int ID_EDIT_CALLBACK_PORT   = 116;
 constexpr int ID_STATIC_CALLBACK_PORT = 117;
+constexpr int ID_EDIT_TOKEN_EP        = 118;
+constexpr int ID_STATIC_TOKEN_EP      = 119;
 constexpr int BUF_LEN                 = 1024;
 
 
@@ -64,6 +66,9 @@ DSNForm::DSNForm(HWND parent, std::map<std::string, std::string> attributes) {
   }
   if (attributes.count("callbackPort") > 0) {
     this->configResult.setCallbackPort(attributes.at("callbackPort"));
+  }
+  if (attributes.count("tokenendpoint") > 0) {
+    this->configResult.setTokenEndpoint(attributes.at("tokenendpoint"));
   }
 }
 
@@ -115,6 +120,8 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
       HWND oidcScopeLabel        = GetDlgItem(hwnd, ID_STATIC_OIDC_SCOPE);
       HWND callbackPortItem      = GetDlgItem(hwnd, ID_EDIT_CALLBACK_PORT);
       HWND callbackPortLabel     = GetDlgItem(hwnd, ID_STATIC_CALLBACK_PORT);
+      HWND tokenEndpointItem     = GetDlgItem(hwnd, ID_EDIT_TOKEN_EP);
+      HWND tokenEndpointLabel    = GetDlgItem(hwnd, ID_STATIC_TOKEN_EP);
       char buf[BUF_LEN]          = {0};
       switch (LOWORD(wParam)) {
         case ID_BUTTON_SAVE: {
@@ -165,6 +172,13 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             driverConfigPtr->setCallbackPort(cbPortStr);
           }
 
+          // Handle the Token Endpoint
+          GetWindowText(tokenEndpointItem, buf, BUF_LEN);
+          std::string tokenEpStr(buf);
+          if (tokenEpStr != NOT_REQUIRED) {
+            driverConfigPtr->setTokenEndpoint(tokenEpStr);
+          }
+
           driverConfigPtr->setIsSaved(true);
 
           DestroyWindow(hwnd);
@@ -202,6 +216,12 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
               setEditText(oidcScopeItem, "");
             }
             setEditWriteable(oidcScopeItem);
+
+            // Token endpoint is always editable for OIDC methods
+            if (getEditText(tokenEndpointItem) == NOT_REQUIRED) {
+              setEditText(tokenEndpointItem, "");
+            }
+            setEditWriteable(tokenEndpointItem);
 
             // Show/hide callback port based on whether this auth
             // method uses the authorization code flow.
@@ -241,6 +261,10 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
               setEditText(callbackPortItem, NOT_REQUIRED);
             }
             setEditReadOnly(callbackPortItem);
+            if (getEditText(tokenEndpointItem) == "") {
+              setEditText(tokenEndpointItem, NOT_REQUIRED);
+            }
+            setEditReadOnly(tokenEndpointItem);
             InvalidateRect(hwnd, NULL, FALSE);
           }
           break;
@@ -283,7 +307,7 @@ void DSNForm::ShowDSNForm() {
                              CW_USEDEFAULT,
                              CW_USEDEFAULT,
                              625,
-                             435,
+                             470,
                              this->parent,
                              NULL,
                              GetModuleHandle(NULL),
@@ -300,20 +324,22 @@ void DSNForm::ShowDSNForm() {
   labelMaker(form, 100, NULL, "Log Level:", visible);
   labelMaker(form, 130, NULL, "Auth Method:", visible);
   labelMaker(form, 160, ID_STATIC_OIDC_DISC, "OIDC Discovery URL:", oidcVis);
-  labelMaker(form, 190, ID_STATIC_CLIENT_ID, "Client ID:", oidcVis);
-  labelMaker(form, 220, ID_STATIC_CLIENT_SECRET, "Client Secret:", oidcVis);
-  labelMaker(form, 250, ID_STATIC_OIDC_SCOPE, "OIDC Scope:", oidcVis);
-  labelMaker(form, 280, ID_STATIC_CALLBACK_PORT, "Callback Port:", oidcVis);
+  labelMaker(form, 190, ID_STATIC_TOKEN_EP, "Token Endpoint:", oidcVis);
+  labelMaker(form, 220, ID_STATIC_CLIENT_ID, "Client ID:", oidcVis);
+  labelMaker(form, 250, ID_STATIC_CLIENT_SECRET, "Client Secret:", oidcVis);
+  labelMaker(form, 280, ID_STATIC_OIDC_SCOPE, "OIDC Scope:", oidcVis);
+  labelMaker(form, 310, ID_STATIC_CALLBACK_PORT, "Callback Port:", oidcVis);
 
   WriteLog(LL_TRACE, "  Creating Text Entries");
   HWND hwndDsn              = editMaker(form, 10, ID_EDIT_DSN, visible);
   HWND hwndHostname         = editMaker(form, 40, ID_EDIT_HOSTNAME, visible);
   HWND hwndPort             = editMaker(form, 70, ID_EDIT_PORT, visible);
   HWND hwndOidcDiscoveryUrl = editMaker(form, 160, ID_EDIT_OIDC_DISC, oidcVis);
-  HWND hwndClientId         = editMaker(form, 190, ID_EDIT_CLIENT_ID, oidcVis);
-  HWND hwndClientSecret = editMaker(form, 220, ID_EDIT_CLIENT_SECRET, oidcVis);
-  HWND hwndOidcScope    = editMaker(form, 250, ID_EDIT_OIDC_SCOPE, oidcVis);
-  HWND hwndCallbackPort = editMaker(form, 280, ID_EDIT_CALLBACK_PORT, oidcVis);
+  HWND hwndTokenEndpoint    = editMaker(form, 190, ID_EDIT_TOKEN_EP, oidcVis);
+  HWND hwndClientId         = editMaker(form, 220, ID_EDIT_CLIENT_ID, oidcVis);
+  HWND hwndClientSecret     = editMaker(form, 250, ID_EDIT_CLIENT_SECRET, oidcVis);
+  HWND hwndOidcScope        = editMaker(form, 280, ID_EDIT_OIDC_SCOPE, oidcVis);
+  HWND hwndCallbackPort     = editMaker(form, 310, ID_EDIT_CALLBACK_PORT, oidcVis);
 
   // Sometimes the DSN should be read-only such as when an existing DSN is being
   // configured. In those cases, we need to set the EDIT control to readonly as
@@ -335,6 +361,7 @@ void DSNForm::ShowDSNForm() {
   setEditText(hwndHostname, this->configResult.getHostname());
   setEditText(hwndPort, this->configResult.getPortStr());
   setEditText(hwndOidcDiscoveryUrl, this->configResult.getOidcDiscoveryUrl());
+  setEditText(hwndTokenEndpoint, this->configResult.getTokenEndpoint());
   setEditText(hwndClientId, this->configResult.getClientId());
   setEditText(hwndClientSecret, this->configResult.getClientSecret());
   setEditText(hwndOidcScope, this->configResult.getOidcScope());
@@ -345,9 +372,9 @@ void DSNForm::ShowDSNForm() {
   setCombobox(hwndAuthMethod, this->configResult.getAuthMethodStr());
 
   WriteLog(LL_TRACE, "  Creating Buttons");
-  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save", 330);
-  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel", 330);
-  
+  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save", 360);
+  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel", 360);
+
   MSG msg = {};
   WriteLog(LL_TRACE, "  Polling...");
   while (GetMessage(&msg, NULL, 0, 0)) {

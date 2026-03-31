@@ -338,6 +338,12 @@ std::map<std::string, std::string> driverConfigToKVPs(DriverConfig config) {
   if (config.getCallbackPortNum() > 0) {
     kvps["callbackPort"] = config.getCallbackPortStr();
   }
+  if (!config.getTokenEndpoint().empty()) {
+    kvps["tokenendpoint"] = config.getTokenEndpoint();
+  }
+  if (!config.getGrantType().empty()) {
+    kvps["granttype"] = config.getGrantType();
+  }
 
   return kvps;
 }

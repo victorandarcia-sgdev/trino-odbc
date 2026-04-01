@@ -34,7 +34,7 @@ namespace {
 
 std::string generateCodeVerifier() {
   // RFC 7636: code_verifier is a high-entropy cryptographic random string
-  // using unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
+  // using unreserved characters [A-Z] / [a-z] / [0-9] / "-" / "." / "_"  / "~"
   // with a minimum length of 43 and a maximum length of 128 characters.
   static const char charset[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";

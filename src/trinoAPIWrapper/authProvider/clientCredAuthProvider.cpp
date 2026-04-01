@@ -243,4 +243,3 @@ getClientCredAuthProvider(std::string hostname,
                                                   tokenEndpoint);
   }
 }
- 

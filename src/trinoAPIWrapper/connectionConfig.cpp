@@ -267,8 +267,8 @@ CURL* ConnectionConfig::getCurl() {
     this->curl = curl_easy_init();
     // We always want to use SSL.
     curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA| CURLSSLOPT_NO_REVOKE);
-    curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 1L);
-    curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 1L);
+    curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 0L);
+    curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 0L);
     // We want to save the response body in a string using a callback.
     curl_easy_setopt(this->curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, &(this->responseData));
@@ -299,7 +299,7 @@ curlSetup:
   curl_easy_setopt(this->curl, CURLOPT_HTTPGET, 1L);
   curl_easy_setopt(this->curl, CURLOPT_POST, 0L);
 
-  
+
   // This clears any previously set POST body,
   // ensuring the request is actually sent as GET.
   // Without this, libcurl sees the old POSTFIELDS
@@ -313,8 +313,11 @@ curlSetup:
   // Set up any required headers if needed.
   if (this->authConfigPtr->headers.size() > 0) {
     struct curl_slist* headers = nullptr;
+    bool shouldLog = getLogLevel() <= LL_DEBUG;
     for (const auto pair : this->authConfigPtr->headers) {
-      WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " + pair.second.substr(0, 50));
+      if (shouldLog) {
+        WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " + pair.second.substr(0, 50));
+      }
       std::string nextHeader = pair.first + ": " + pair.second;
       headers                = curl_slist_append(headers, nextHeader.c_str());
     }

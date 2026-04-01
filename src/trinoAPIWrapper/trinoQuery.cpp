@@ -246,8 +246,12 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
 
     CURL* curl = this->connectionConfig->getCurl();
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+    if (getLogLevel() <= LL_TRACE) {
+      curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+      curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+    } else {
+      curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    }
 
     WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
                        " | nextUri: " + this->nextUri);

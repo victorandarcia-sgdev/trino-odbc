@@ -61,4 +61,7 @@ class ConnectionConfig {
     std::map<std::string, std::string> getAuthHeaders() {
       return this->authConfigPtr->headers;
     }
+    // Default catalog and schema for narrowing metadata queries.
+    std::string defaultCatalog = "";
+    std::string defaultSchema  = "";
 };

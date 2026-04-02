@@ -133,6 +133,25 @@ SQLColumns(SQLHSTMT StatementHandle,
   WriteLog(LL_TRACE, "  Requested table: " + tableName);
   WriteLog(LL_TRACE, "  Requested columnName: " + columnName);
 
+  // Apply default catalog/schema when the application sends empty
+  // filters to reduce the number of server-side permission checks.
+  std::string defaultCatalog = "";
+  std::string defaultSchema  = "";
+  if (statement->connectionConfig) {
+    defaultCatalog = statement->connectionConfig->defaultCatalog;
+    defaultSchema  = statement->connectionConfig->defaultSchema;
+  }
+  if (catalogName.empty() && !defaultCatalog.empty()) {
+    WriteLog(LL_INFO,
+             "  Applying default catalog filter: " + defaultCatalog);
+    catalogName = defaultCatalog;
+  }
+  if (schemaName.empty() && !defaultSchema.empty()) {
+    WriteLog(LL_INFO,
+             "  Applying default schema filter: " + defaultSchema);
+    schemaName = defaultSchema;
+  }
+
   std::string query =
       constructColumnQuery(catalogName, schemaName, tableName, columnName);
   statement->trinoQuery->setQuery(query);

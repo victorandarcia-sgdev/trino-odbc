@@ -29,6 +29,10 @@ constexpr int ID_EDIT_CALLBACK_PORT   = 116;
 constexpr int ID_STATIC_CALLBACK_PORT = 117;
 constexpr int ID_EDIT_TOKEN_EP        = 118;
 constexpr int ID_STATIC_TOKEN_EP      = 119;
+constexpr int ID_EDIT_DEF_CATALOG     = 120;
+constexpr int ID_STATIC_DEF_CATALOG   = 121;
+constexpr int ID_EDIT_DEF_SCHEMA      = 122;
+constexpr int ID_STATIC_DEF_SCHEMA    = 123;
 constexpr int BUF_LEN                 = 1024;
 
 
@@ -69,6 +73,12 @@ DSNForm::DSNForm(HWND parent, std::map<std::string, std::string> attributes) {
   }
   if (attributes.count("tokenendpoint") > 0) {
     this->configResult.setTokenEndpoint(attributes.at("tokenendpoint"));
+  }
+  if (attributes.count("defaultCatalog") > 0) {
+    this->configResult.setDefaultCatalog(attributes.at("defaultCatalog"));
+  }
+  if (attributes.count("defaultSchema") > 0) {
+    this->configResult.setDefaultSchema(attributes.at("defaultSchema"));
   }
 }
 
@@ -122,6 +132,8 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
       HWND callbackPortLabel     = GetDlgItem(hwnd, ID_STATIC_CALLBACK_PORT);
       HWND tokenEndpointItem     = GetDlgItem(hwnd, ID_EDIT_TOKEN_EP);
       HWND tokenEndpointLabel    = GetDlgItem(hwnd, ID_STATIC_TOKEN_EP);
+      HWND defaultCatalogItem    = GetDlgItem(hwnd, ID_EDIT_DEF_CATALOG);
+      HWND defaultSchemaItem     = GetDlgItem(hwnd, ID_EDIT_DEF_SCHEMA);
       char buf[BUF_LEN]          = {0};
       switch (LOWORD(wParam)) {
         case ID_BUTTON_SAVE: {
@@ -178,6 +190,13 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
           if (tokenEpStr != NOT_REQUIRED) {
             driverConfigPtr->setTokenEndpoint(tokenEpStr);
           }
+          // Handle the Default Catalog
+          GetWindowText(defaultCatalogItem, buf, BUF_LEN);
+          driverConfigPtr->setDefaultCatalog(std::string(buf));
+
+          // Handle the Default Schema
+          GetWindowText(defaultSchemaItem, buf, BUF_LEN);
+          driverConfigPtr->setDefaultSchema(std::string(buf));
 
           driverConfigPtr->setIsSaved(true);
 
@@ -307,7 +326,7 @@ void DSNForm::ShowDSNForm() {
                              CW_USEDEFAULT,
                              CW_USEDEFAULT,
                              625,
-                             470,
+                             530,
                              this->parent,
                              NULL,
                              GetModuleHandle(NULL),
@@ -329,6 +348,8 @@ void DSNForm::ShowDSNForm() {
   labelMaker(form, 250, ID_STATIC_CLIENT_SECRET, "Client Secret:", oidcVis);
   labelMaker(form, 280, ID_STATIC_OIDC_SCOPE, "OIDC Scope:", oidcVis);
   labelMaker(form, 310, ID_STATIC_CALLBACK_PORT, "Callback Port:", oidcVis);
+  labelMaker(form, 340, ID_STATIC_DEF_CATALOG, "Default Catalog:", visible);
+  labelMaker(form, 370, ID_STATIC_DEF_SCHEMA, "Default Schema:", visible);
 
   WriteLog(LL_TRACE, "  Creating Text Entries");
   HWND hwndDsn              = editMaker(form, 10, ID_EDIT_DSN, visible);
@@ -366,14 +387,16 @@ void DSNForm::ShowDSNForm() {
   setEditText(hwndClientSecret, this->configResult.getClientSecret());
   setEditText(hwndOidcScope, this->configResult.getOidcScope());
   setEditText(hwndCallbackPort, this->configResult.getCallbackPortStr());
+  setEditText(hwndDefaultCatalog, this->configResult.getDefaultCatalog());
+  setEditText(hwndDefaultSchema, this->configResult.getDefaultSchema());
 
   WriteLog(LL_TRACE, "  Pre-poplating Comboboxes");
   setCombobox(hwndLogLevel, this->configResult.getLogLevelStr());
   setCombobox(hwndAuthMethod, this->configResult.getAuthMethodStr());
 
   WriteLog(LL_TRACE, "  Creating Buttons");
-  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save", 360);
-  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel", 360);
+  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save", 420);
+  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel", 420);
 
   MSG msg = {};
   WriteLog(LL_TRACE, "  Polling...");

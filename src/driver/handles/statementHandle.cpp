@@ -70,6 +70,7 @@ void Statement::columnsChangedCallback(TrinoQuery* trinoQuery) {
 }
 
 Statement::Statement(ConnectionConfig* connectionConfig) {
+  this->connectionConfig = connectionConfig;
   this->trinoQuery   = new TrinoQuery(connectionConfig);
   this->impParamDesc = new Descriptor();
   this->impRowDesc   = new Descriptor();

@@ -72,7 +72,9 @@ std::map<std::string, std::string> DRIVER_CONFIG_DEFAULT_VALUES = {
     std::make_pair("secretEncryptionLevel", "user"),
     std::make_pair("redirectUri", ""),
     std::make_pair("callbackPort", "8890"),
-};
+    std::make_pair("defaultCatalog", ""),
+    std::make_pair("defaultSchema", ""),
+  };
 
 // DSN
 std::string DriverConfig::getDSN() {
@@ -216,6 +218,22 @@ void DriverConfig::setCallbackPort(uint16_t callbackPort) {
   this->callbackPort = callbackPort;
 }
 
+// Default Catalog
+std::string DriverConfig::getDefaultCatalog() {
+  return this->defaultCatalog;
+}
+void DriverConfig::setDefaultCatalog(std::string defaultCatalog) {
+  this->defaultCatalog = defaultCatalog;
+}
+
+// Default Schema
+std::string DriverConfig::getDefaultSchema() {
+  return this->defaultSchema;
+}
+void DriverConfig::setDefaultSchema(std::string defaultSchema) {
+  this->defaultSchema = defaultSchema;
+}
+
 // IsSaved
 bool DriverConfig::getIsSaved() {
   return this->isSaved;
@@ -294,6 +312,18 @@ DriverConfig driverConfigFromKVPs(std::map<std::string, std::string> kvps) {
   if (kvps.count("callbackport")) {
     config.setCallbackPort(kvps.at("callbackport"));
   }
+  if (kvps.count("defaultCatalog")) {
+    config.setDefaultCatalog(kvps.at("defaultCatalog"));
+  }
+  if (kvps.count("defaultcatalog")) {
+    config.setDefaultCatalog(kvps.at("defaultcatalog"));
+  }
+  if (kvps.count("defaultSchema")) {
+    config.setDefaultSchema(kvps.at("defaultSchema"));
+  }
+  if (kvps.count("defaultschema")) {
+    config.setDefaultSchema(kvps.at("defaultschema"));
+  }
 
   return config;
 }
@@ -343,6 +373,12 @@ std::map<std::string, std::string> driverConfigToKVPs(DriverConfig config) {
   }
   if (!config.getGrantType().empty()) {
     kvps["granttype"] = config.getGrantType();
+  }
+  if (!config.getDefaultCatalog().empty()) {
+    kvps["defaultCatalog"] = config.getDefaultCatalog();
+  }
+  if (!config.getDefaultSchema().empty()) {
+    kvps["defaultSchema"] = config.getDefaultSchema();
   }
 
   return kvps;

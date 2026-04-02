@@ -36,6 +36,10 @@ class Statement {
     // The method used in SQLFetch for polling trino.
     TrinoQueryPollMode fetchPollMode = UntilNewData;
 
+    // Reference to the connection config for access to
+    // connection-level settings like default catalog and schema.
+    ConnectionConfig* connectionConfig = nullptr;
+
     // The ODBC protocol assumes these descriptors are
     // instantiated on all statements.
     Descriptor* appRowDesc;

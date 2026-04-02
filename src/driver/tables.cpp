@@ -122,6 +122,13 @@ SQLRETURN SQL_API SQLTables(SQLHSTMT StatementHandle,
   WriteLog(LL_TRACE, "  Requested schema: " + schemaName);
   WriteLog(LL_TRACE, "  Requested table: " + tableName);
   WriteLog(LL_TRACE, "  Requested table type: " + tableType);
+  // Retrieve default catalog and schema from the connection config.
+  std::string defaultCatalog = "";
+  std::string defaultSchema  = "";
+  if (statement->connectionConfig) {
+    defaultCatalog = statement->connectionConfig->defaultCatalog;
+    defaultSchema  = statement->connectionConfig->defaultSchema;
+  }
 
   // Special cases to enable enumeration of catalogs, schemas, and table types.
   if (catalogName == SQL_ALL_CATALOGS and schemaName.empty() and
@@ -158,6 +165,19 @@ SQLRETURN SQL_API SQLTables(SQLHSTMT StatementHandle,
     if (tableType.empty()) {
       tableType = std::string("%");
     }
+    // Apply default catalog/schema when the application requests a
+    // wildcard to reduce the number of server-side permission checks.
+    if (catalogName == "%" && !defaultCatalog.empty()) {
+      WriteLog(LL_INFO,
+               "  Applying default catalog filter: " + defaultCatalog);
+      catalogName = defaultCatalog;
+    }
+    if (schemaName == "%" && !defaultSchema.empty()) {
+      WriteLog(LL_INFO,
+               "  Applying default schema filter: " + defaultSchema);
+      schemaName = defaultSchema;
+    }
+
     std::string query =
         constructTableQuery(catalogName, schemaName, tableName, tableType);
     WriteLog(LL_TRACE, "Final query is: " + query);

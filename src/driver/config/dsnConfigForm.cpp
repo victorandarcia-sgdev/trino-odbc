@@ -361,6 +361,8 @@ void DSNForm::ShowDSNForm() {
   HWND hwndClientSecret     = editMaker(form, 250, ID_EDIT_CLIENT_SECRET, oidcVis);
   HWND hwndOidcScope        = editMaker(form, 280, ID_EDIT_OIDC_SCOPE, oidcVis);
   HWND hwndCallbackPort     = editMaker(form, 310, ID_EDIT_CALLBACK_PORT, oidcVis);
+  HWND hwndDefaultCatalog   = editMaker(form, 340, ID_EDIT_DEF_CATALOG, visible);
+  HWND hwndDefaultSchema    = editMaker(form, 370, ID_EDIT_DEF_SCHEMA, visible);
 
   // Sometimes the DSN should be read-only such as when an existing DSN is being
   // configured. In those cases, we need to set the EDIT control to readonly as

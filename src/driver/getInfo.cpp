@@ -850,10 +850,6 @@ _Success_(return == SQL_SUCCESS) SQLRETURN SQL_API
       writeNullTermStringToPtr(InfoValue, "table", StringLengthPtr);
       break;
     }
-    case SQL_SCHEMA_TERM: { // 39 - same as SQL_OWNER_TERM
-      writeNullTermStringToPtr(InfoValue, "schema", StringLengthPtr);
-      break;
-    }
     case SQL_MAX_COLUMN_NAME_LEN: { // 30
       *((SQLUSMALLINT*)InfoValue) = 128;
       break;

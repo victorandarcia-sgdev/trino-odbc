@@ -7,7 +7,14 @@
 
 SQLRETURN SQL_API SQLCloseCursor(SQLHSTMT StatementHandle) {
   WriteLog(LL_TRACE, "Entering SQLCloseCursor");
+  if (!StatementHandle) {
+    return SQL_INVALID_HANDLE;
+  }
   Statement* statement = reinterpret_cast<Statement*>(StatementHandle);
-  WriteLog(LL_ERROR, "  ERROR: SQLCloseCursor is unimplemented");
-  return SQL_ERROR;
+  // Close the cursor by resetting the statement. This terminates
+  // any in-flight Trino query and prepares the statement for reuse.
+  // Applications like PBI Report Server call this between a schema
+  // validation fetch and the full data fetch.
+  statement->reset();
+  return SQL_SUCCESS;
 }

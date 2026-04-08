@@ -101,7 +101,15 @@ void Statement::reset() {
   this->executed              = false;
   this->fetchExecuteConfirmed = false;
   this->fetchedPosition       = -1;
-  this->trinoQuery->reset();
+  // Terminate any in-flight query before resetting state.
+  // This prevents orphaned queries on the Trino server when
+  // applications re-execute queries on the same statement handle.
+  try {
+    this->trinoQuery->terminate();
+  } catch (...) {
+    // If termination fails, still proceed with the reset.
+    this->trinoQuery->reset();
+  }
   this->impParamDesc->reset();
   this->impRowDesc->reset();
 }

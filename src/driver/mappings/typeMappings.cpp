@@ -16,6 +16,15 @@ std::unordered_map<std::string, SQLSMALLINT> TRINO_RAW_TYPE_TO_ODBC_TYPE_CODE =
         std::make_pair("time", SQL_TYPE_TIME),
         std::make_pair("timestamp", SQL_TYPE_TIMESTAMP),
         std::make_pair("timestamp with time zone", SQL_TYPE_TIMESTAMP),
+        std::make_pair("array", SQL_VARCHAR),
+        std::make_pair("map", SQL_VARCHAR),
+        std::make_pair("row", SQL_VARCHAR),
+        std::make_pair("varbinary", SQL_VARBINARY),
+        std::make_pair("char", SQL_CHAR),
+        std::make_pair("json", SQL_VARCHAR),
+        std::make_pair("interval year to month", SQL_VARCHAR),
+        std::make_pair("interval day to second", SQL_VARCHAR),
+        std::make_pair("ipaddress", SQL_VARCHAR),
 };
 
 std::unordered_map<std::string, SQLLEN> TRINO_RAW_TYPE_TO_ODBC_SIZE_BYTES = {
@@ -33,6 +42,15 @@ std::unordered_map<std::string, SQLLEN> TRINO_RAW_TYPE_TO_ODBC_SIZE_BYTES = {
     std::make_pair("time", sizeof(SQL_TIME_STRUCT)),
     std::make_pair("timestamp", sizeof(SQL_TIMESTAMP_STRUCT)),
     std::make_pair("timestamp with time zone", sizeof(SQL_TIMESTAMP_STRUCT)),
+    std::make_pair("array", SQL_NO_TOTAL),
+    std::make_pair("map", SQL_NO_TOTAL),
+    std::make_pair("row", SQL_NO_TOTAL),
+    std::make_pair("varbinary", SQL_NO_TOTAL),
+    std::make_pair("char", SQL_NO_TOTAL),
+    std::make_pair("json", SQL_NO_TOTAL),
+    std::make_pair("interval year to month", SQL_NO_TOTAL),
+    std::make_pair("interval day to second", SQL_NO_TOTAL),
+    std::make_pair("ipaddress", SQL_NO_TOTAL),
 };
 
 /*
@@ -57,6 +75,15 @@ std::unordered_map<std::string, bool> TRINO_RAW_TYPE_TO_UNSIGNED = {
     std::make_pair("time", true),
     std::make_pair("timestamp", true),
     std::make_pair("timestamp with time zone", true),
+    std::make_pair("array", true),
+    std::make_pair("map", true),
+    std::make_pair("row", true),
+    std::make_pair("varbinary", true),
+    std::make_pair("char", true),
+    std::make_pair("json", true),
+    std::make_pair("interval year to month", true),
+    std::make_pair("interval day to second", true),
+    std::make_pair("ipaddress", true),
 };
 
 /*

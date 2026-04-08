@@ -25,13 +25,34 @@ SQLRETURN SQL_API SQLGetConnectAttr(
       writeNullTermStringToPtr(Value, "system", StringLengthPtr);
       break;
     }
+    case SQL_ATTR_CONNECTION_TIMEOUT: { // 113
+      // Report Server asks for this. Return 0 = no timeout.
+      *((SQLUINTEGER*)Value) = 0;
+      break;
+    }
+    case SQL_ATTR_LOGIN_TIMEOUT: { // 103
+      // Return 0 = no timeout.
+      *((SQLUINTEGER*)Value) = 0;
+      break;
+    }
+    case SQL_ATTR_AUTOCOMMIT: { // 102
+      // Trino doesn't support transactions. Always autocommit.
+      *((SQLUINTEGER*)Value) = SQL_AUTOCOMMIT_ON;
+      break;
+    }
+    case SQL_ATTR_TXN_ISOLATION: { // 108
+      // Return read uncommitted since Trino has no transactions.
+      *((SQLUINTEGER*)Value) = SQL_TXN_READ_UNCOMMITTED;
+      break;
+    }
     default: {
-      WriteLog(LL_ERROR,
-               "  ERROR: Application is requesting unimplemented connection "
+      WriteLog(LL_WARN,
+               "  WARNING: Application is requesting unimplemented connection "
                "attribute: " +
                    std::to_string(Attribute));
-      return SQL_ERROR;
+      return SQL_SUCCESS_WITH_INFO;
     }
+
   }
   return SQL_SUCCESS;
 }

@@ -776,16 +776,104 @@ _Success_(return == SQL_SUCCESS) SQLRETURN SQL_API
       break;
     }
     // Handle other InfoType cases...
-    default: {
-      WriteLog(LL_ERROR,
-               "  ERROR: No info for requested parameter: " +
-                   std::to_string(InfoType) + " - returning error code");
-      std::string errorMessage =
-          "Unknown InfoType to SQLGetInfo with id: " + std::to_string(InfoType);
-      // HY091 = Invalid Descriptor Field Identifier.
-      connection->setError(ErrorInfo(errorMessage, "HY091"));
-      return SQL_ERROR;
+    case SQL_TXN_CAPABLE: { // 46
+      // Trino doesn't support transactions.
+      *((SQLUSMALLINT*)InfoValue) = SQL_TC_NONE;
+      break;
     }
+    case SQL_TXN_ISOLATION_OPTION: { // 72
+      // Only read uncommitted since no real transactions.
+      *((SQLUINTEGER*)InfoValue) = SQL_TXN_READ_UNCOMMITTED;
+      break;
+    }
+    case SQL_DEFAULT_TXN_ISOLATION: { // 26
+      *((SQLUINTEGER*)InfoValue) = SQL_TXN_READ_UNCOMMITTED;
+      break;
+    }
+    case SQL_QUOTED_IDENTIFIER_CASE: { // 93
+      // Quoted identifiers are case-sensitive in Trino.
+      *((SQLUSMALLINT*)InfoValue) = SQL_IC_SENSITIVE;
+      break;
+    }
+    case SQL_IDENTIFIER_CASE: { // 28
+      // Unquoted identifiers are lowered in Trino.
+      *((SQLUSMALLINT*)InfoValue) = SQL_IC_LOWER;
+      break;
+    }
+    case SQL_CORRELATION_NAME: { // 74
+      // Trino supports table correlation names (aliases).
+      *((SQLUSMALLINT*)InfoValue) = SQL_CN_ANY;
+      break;
+    }
+    case SQL_NON_NULLABLE_COLUMNS: { // 75
+      // Trino does support non-nullable columns.
+      *((SQLUSMALLINT*)InfoValue) = SQL_NNC_NON_NULL;
+      break;
+    }
+    case SQL_SUBQUERIES: { // 95
+      *((SQLUINTEGER*)InfoValue) = SQL_SQ_CORRELATED_SUBQUERIES |
+                                   SQL_SQ_COMPARISON |
+                                   SQL_SQ_EXISTS |
+                                   SQL_SQ_IN |
+                                   SQL_SQ_QUANTIFIED;
+      break;
+    }
+    case SQL_UNION: { // 96
+      *((SQLUINTEGER*)InfoValue) = SQL_U_UNION | SQL_U_UNION_ALL;
+      break;
+    }
+    case SQL_EXPRESSIONS_IN_ORDERBY: { // 27
+      writeNullTermStringToPtr(InfoValue, "Y", StringLengthPtr);
+      break;
+    }
+    case SQL_LIKE_ESCAPE_CLAUSE: { // 113
+      writeNullTermStringToPtr(InfoValue, "Y", StringLengthPtr);
+      break;
+    }
+    case SQL_MULT_RESULT_SETS: { // 36
+      writeNullTermStringToPtr(InfoValue, "N", StringLengthPtr);
+      break;
+    }
+    case SQL_MULTIPLE_ACTIVE_TXN: { // 37
+      writeNullTermStringToPtr(InfoValue, "N", StringLengthPtr);
+      break;
+    }
+    case SQL_OUTER_JOINS: { // 38
+      writeNullTermStringToPtr(InfoValue, "Y", StringLengthPtr);
+      break;
+    }
+    case SQL_PROCEDURES: { // 21
+      writeNullTermStringToPtr(InfoValue, "N", StringLengthPtr);
+      break;
+    }
+    case SQL_TABLE_TERM: { // 45
+      writeNullTermStringToPtr(InfoValue, "table", StringLengthPtr);
+      break;
+    }
+    case SQL_SCHEMA_TERM: { // 39 - same as SQL_OWNER_TERM
+      writeNullTermStringToPtr(InfoValue, "schema", StringLengthPtr);
+      break;
+    }
+    case SQL_MAX_COLUMN_NAME_LEN: { // 30
+      *((SQLUSMALLINT*)InfoValue) = 128;
+      break;
+    }
+    case SQL_NULL_COLLATION: { // 85
+      // Trino sorts nulls last by default.
+      *((SQLUSMALLINT*)InfoValue) = SQL_NC_END;
+      break;
+    }
+    // Handle other InfoType cases...
+    default: {
+      WriteLog(LL_WARN,
+               "  WARNING: No info for requested parameter: " +
+                   std::to_string(InfoType) + " - returning success with info");
+      if (StringLengthPtr) {
+        *StringLengthPtr = 0;
+      }
+      return SQL_SUCCESS_WITH_INFO;
+    }
+
   }
   return SQL_SUCCESS;
 };

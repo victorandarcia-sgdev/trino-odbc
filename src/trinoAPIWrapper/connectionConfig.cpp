@@ -170,14 +170,10 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
       break;
     }
     case AM_OIDC_AUTO: {
-      // Auto-detect the best authentication flow based on the
-      // execution environment and available credentials.
       bool hasClientSecret = !clientSecret.empty();
       bool canShowUI       = canDisplayInteractiveUI();
 
       if (hasClientSecret && !canShowUI) {
-        // Headless with credentials → client credentials flow.
-        // This is the typical PBI Report Server scenario.
         WriteLog(LL_INFO,
                  "  OIDC Auto: Headless environment detected with client "
                  "secret present. Using Client Credentials flow.");
@@ -191,8 +187,6 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                                         grantType,
                                                         tokenEndpoint);
       } else if (canShowUI) {
-        // Interactive session → auth code + PKCE flow.
-        // This is the typical PBI Desktop / Excel scenario.
         WriteLog(LL_INFO,
                  "  OIDC Auto: Interactive environment detected. "
                  "Using Authorization Code + PKCE flow.");
@@ -207,7 +201,6 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                                        redirectUri,
                                                        callbackPort);
       } else if (hasClientSecret) {
-        // Fallback: no UI but has credentials.
         WriteLog(LL_INFO,
                  "  OIDC Auto: No UI available but client secret present. "
                  "Using Client Credentials flow.");
@@ -259,14 +252,72 @@ std::string const ConnectionConfig::getStatementUrl() {
   return (this->hostname) + ":" + std::to_string(port) + "/v1/statement";
 }
 
+CURL* ConnectionConfig::createQueryCurlHandle() {
+  CURL* handle = curl_easy_init();
+  if (!handle) {
+    WriteLog(LL_ERROR, "  ERROR: Failed to create CURL handle for query");
+    return nullptr;
+  }
+
+  // SSL configuration matching the connection handle.
+  curl_easy_setopt(
+      handle, CURLOPT_SSL_OPTIONS,
+      CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
+
+  // Connection reuse within this handle's lifetime.
+  curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 0L);
+  curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
+
+  // Timeout matching the connection handle.
+  curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, 60000);
+
+  // Compression support.
+  curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+
+  return handle;
+}
+
+void ConnectionConfig::refreshAuthIfNeeded() {
+  if (this->authConfigPtr->isExpired()) {
+    WriteLog(LL_TRACE,
+             "  Detected expired authentication. Reauthenticating...");
+    // Ensure the connection CURL handle exists for auth refresh.
+    if (this->curl == nullptr) {
+      this->curl = curl_easy_init();
+      curl_easy_setopt(
+          this->curl, CURLOPT_SSL_OPTIONS,
+          CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
+      curl_easy_setopt(this->curl, CURLOPT_TIMEOUT_MS, 60000);
+      curl_easy_setopt(
+          this->curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+      curl_easy_setopt(
+          this->curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
+      curl_easy_setopt(
+          this->curl, CURLOPT_WRITEDATA, &(this->responseData));
+      curl_easy_setopt(
+          this->curl, CURLOPT_HEADERFUNCTION, curlHeaderCallback);
+      curl_easy_setopt(
+          this->curl, CURLOPT_HEADERDATA, &(this->responseHeaderData));
+    }
+    this->responseData.clear();
+    this->responseHeaderData.clear();
+    this->authConfigPtr->refresh(
+        this->curl, &(this->responseData), &(this->responseHeaderData));
+  }
+}
+
 CURL* ConnectionConfig::getCurl() {
   /*
   Return a curl handle, reset it if needed, and it's ready to go.
+  This is used for connection-level operations like auth refresh
+  and server version checks. Query execution uses per-statement
+  CURL handles created by createQueryCurlHandle().
   */
   if (this->curl == nullptr) {
     this->curl = curl_easy_init();
     // We always want to use SSL.
-    curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA| CURLSSLOPT_NO_REVOKE);
+    curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS,
+                     CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
     curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 0L);
     curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 0L);
     // We want to save the response body in a string using a callback.
@@ -288,35 +339,19 @@ curlSetup:
   // Clear the previous response headers as well
   this->responseHeaderData.clear();
 
-  // We could do a full reset here, but that seems to slow the driver
-  // down considerably. Better to just reset a few things and
-  // otherwise reuse the curl handle.
-  // curl_easy_reset(this->curl);
-
-  // Let's say the standard state of curl is that the
-  // handle is configured to run GET requests, no matter
-  // how it was used before.
   curl_easy_setopt(this->curl, CURLOPT_HTTPGET, 1L);
   curl_easy_setopt(this->curl, CURLOPT_POST, 0L);
-
-
-  // This clears any previously set POST body,
-  // ensuring the request is actually sent as GET.
-  // Without this, libcurl sees the old POSTFIELDS
-  // and sends POST even though HTTPGET was set.
   curl_easy_setopt(this->curl, CURLOPT_POSTFIELDS, nullptr);
-
-
-  // Also reset any custom request method (DELETE, etc.)
   curl_easy_setopt(this->curl, CURLOPT_CUSTOMREQUEST, nullptr);
 
   // Set up any required headers if needed.
   if (this->authConfigPtr->headers.size() > 0) {
     struct curl_slist* headers = nullptr;
     bool shouldLog = getLogLevel() <= LL_DEBUG;
-    for (const auto pair : this->authConfigPtr->headers) {
+    for (auto pair : this->authConfigPtr->headers) {
       if (shouldLog) {
-        WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " + pair.second.substr(0, 50));
+        WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " +
+                           pair.second.substr(0, 50));
       }
       std::string nextHeader = pair.first + ": " + pair.second;
       headers                = curl_slist_append(headers, nextHeader.c_str());
@@ -325,8 +360,7 @@ curlSetup:
   }
 
   // Now that we have a fully configured CURL handle, check if we need to do
-  // any required auth steps. We may need to use the configured handle to
-  // perform the authentication.
+  // any required auth steps.
   if (this->authConfigPtr->isExpired()) {
     WriteLog(LL_TRACE,
              "  Detected expired authentication. Reauthenticating...");

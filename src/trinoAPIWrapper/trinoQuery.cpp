@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <ranges>
 #include <thread>
 
@@ -16,16 +17,44 @@
 #include "../util/stringTrim.hpp"
 #include "../util/writeLog.hpp"
 
+static size_t
+curlWriteCallback(void* contents, size_t size, size_t nmemb, std::string* s) {
+  size_t totalSize = size * nmemb;
+  s->append(static_cast<char*>(contents), totalSize);
+  return totalSize;
+}
+
+static size_t
+curlHeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
+  std::map<std::string, std::string>* responseHeaderData =
+      (std::map<std::string, std::string>*)userdata;
+  std::string headerData = std::string(buffer, nitems);
+  if (headerData.starts_with("HTTP/")) {
+    responseHeaderData->insert({"http", headerData});
+  } else {
+    auto firstColon = headerData.find(':');
+    if (firstColon != std::string::npos) {
+      std::string key   = headerData.substr(0, firstColon);
+      std::string value = headerData.substr(firstColon + 1);
+      trim(value);
+      responseHeaderData->insert({key, value});
+    }
+  }
+  return nitems * size;
+}
+
 static int curlDebugCallback(CURL* handle, curl_infotype type,
                              char* data, size_t size, void* userptr) {
   if (type == CURLINFO_TEXT) {
     std::string msg(data, size);
-    // Remove trailing newline
-    if (!msg.empty() && msg.back() == '\n') msg.pop_back();
+    if (!msg.empty() && msg.back() == '\n') {
+      msg.pop_back();
+    }
     WriteLog(LL_DEBUG, "  CURL: " + msg);
   }
   return 0;
 }
+
 // How long should we poll between requests to Trino's nextUri?
 int API_POLL_INTERVAL_MS = 25;
 
@@ -33,11 +62,16 @@ TrinoQuery::TrinoQuery(ConnectionConfig* connectionConfig) {
   this->connectionConfig = connectionConfig;
   this->connectionConfig->registerDisconnectCallback(
       std::bind(&TrinoQuery::onConnectionReset, this, std::placeholders::_1));
+  this->curlHandle = this->connectionConfig->createQueryCurlHandle();
 }
 
 TrinoQuery::~TrinoQuery() {
   this->connectionConfig->unregisterDisconnectCallback(
       std::bind(&TrinoQuery::onConnectionReset, this, std::placeholders::_1));
+  if (this->curlHandle) {
+    curl_easy_cleanup(this->curlHandle);
+    this->curlHandle = nullptr;
+  }
 }
 
 std::string TrinoQuery::parseTrinoError(const json& errorJson) {
@@ -56,12 +90,10 @@ std::string TrinoQuery::parseTrinoError(const json& errorJson) {
       << "\tError Type: " << errorType << "\n"
       << "\tError Code: " << errorName << "(" << errorCode << ")\n";
 
-  // Top-level error message
   if (errorJson.contains("message")) {
     oss << "\tMessage: " << errorJson["message"].get<std::string>() << "\n";
   }
 
-  // Failure info (nested error details)
   if (errorJson.contains("failureInfo")) {
     auto failureInfo = errorJson["failureInfo"];
 
@@ -72,7 +104,6 @@ std::string TrinoQuery::parseTrinoError(const json& errorJson) {
       }
     }
 
-    // Cause (nested stack)
     if (failureInfo.contains("cause") &&
         failureInfo["cause"].contains("type") &&
         failureInfo["cause"].contains("stack")) {
@@ -83,7 +114,6 @@ std::string TrinoQuery::parseTrinoError(const json& errorJson) {
     }
   }
 
-  // Top-level stack (rare, but possible?)
   if (errorJson.contains("stack")) {
     oss << "\tTop Stack:\n";
     for (const auto& frame : errorJson["stack"]) {
@@ -96,7 +126,7 @@ std::string TrinoQuery::parseTrinoError(const json& errorJson) {
 
 UpdateStatus TrinoQuery::updateSelfFromResponse() {
   WriteLog(LL_TRACE, "  Entering TrinoQuery::updateSelfFromResponse");
-  json response_json = json::parse(this->connectionConfig->responseData);
+  json response_json = json::parse(this->responseData);
   WriteLog(LL_DEBUG, "  Response is Parsed");
   UpdateStatus updateStatus;
 
@@ -131,8 +161,6 @@ UpdateStatus TrinoQuery::updateSelfFromResponse() {
   if (response_json.contains("nextUri")) {
     this->nextUri = response_json["nextUri"];
   } else {
-    // This marks the point after which no more data will arrive,
-    // so the query is now completed.
     this->completed = true;
     this->nextUri.clear();
   }
@@ -157,18 +185,12 @@ UpdateStatus TrinoQuery::updateSelfFromResponse() {
     updateStatus.gotRowData = true;
     size_t existingRows     = this->dataJson.size();
     size_t newRows          = response_json["data"].size();
-    // Optimization: pre-allocate enough room to hold all the
-    // rows of data up front, this avoids resizing over and
-    // over to hold an unknown quantity of rows.
     this->dataJson.reserve(existingRows + newRows);
     this->dataJson.insert(this->dataJson.end(),
                           response_json["data"].begin(),
                           response_json["data"].end());
   }
 
-  // All "real" queries contain a state, but sideloaded
-  // queries from ODBC functions might not, so we need
-  // to handle a no-state response gracefully.
   if (response_json.contains("stats")) {
     if (response_json["stats"].contains("state")) {
       this->status = response_json["stats"]["state"];
@@ -180,8 +202,6 @@ UpdateStatus TrinoQuery::updateSelfFromResponse() {
 }
 
 void TrinoQuery::onConnectionReset(ConnectionConfig* connectionConfig) {
-  // If the connection is about to be reset, terminate any in-flight
-  // queries first so they aren't left abandoned.
   this->terminate();
 }
 
@@ -194,27 +214,57 @@ const std::string& TrinoQuery::getQuery() const {
 }
 
 void TrinoQuery::post() {
-  CURL* curl = this->connectionConfig->getCurl();
+  // Ensure auth is current before posting.
+  this->connectionConfig->refreshAuthIfNeeded();
+
+  CURL* curl = this->curlHandle;
+
+  // Clear previous response data.
+  this->responseData.clear();
+  this->responseHeaderData.clear();
+
+  // Configure write callbacks to use our own buffers.
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &(this->responseData));
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curlHeaderCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &(this->responseHeaderData));
 
   std::string statementURL = this->connectionConfig->getStatementUrl();
   curl_easy_setopt(curl, CURLOPT_URL, statementURL.c_str());
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, query.c_str());
 
+  // Set auth headers.
+  struct curl_slist* headers = nullptr;
+  bool shouldLog = getLogLevel() <= LL_DEBUG;
+  for (auto pair : this->connectionConfig->getAuthHeaders()) {
+    std::string h = pair.first + ": " + pair.second;
+    if (shouldLog) {
+      WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " +
+                         pair.second.substr(0, 50));
+    }
+    headers = curl_slist_append(headers, h.c_str());
+  }
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
   CURLcode res = curl_easy_perform(curl);
 
-  // Immediately reset CURL back to GET mode after POST.
-  // This prevents the poll loop from sending POST requests
-  // to Trino's nextUri which expects GET.
+  // Reset CURL back to GET mode after POST.
   curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
   curl_easy_setopt(curl, CURLOPT_POST, 0L);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
 
+  // Free headers.
+  if (headers) {
+    curl_slist_free_all(headers);
+  }
+
   if (res != CURLE_OK) {
     WriteLog(LL_ERROR, std::string("CURL error: ") + curl_easy_strerror(res));
   }
 
-  long httpStatusCode = this->connectionConfig->getLastHTTPStatusCode();
+  long httpStatusCode = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatusCode);
 
   if (httpStatusCode == 200 and res == CURLE_OK) {
     updateSelfFromResponse();
@@ -225,7 +275,6 @@ void TrinoQuery::post() {
       throw std::runtime_error("No NextURI in Trino POST response");
     }
   } else {
-    // If we get here, there was a problem posting the query.
     WriteLog(LL_ERROR,
              "  Error POSTing query. CURL status code was " +
                  std::to_string(httpStatusCode));
@@ -241,28 +290,45 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
 
   int pollCount = 1;
   while (!this->completed) {
-    this->connectionConfig->responseData.clear();
-    this->connectionConfig->responseHeaderData.clear();
+    this->responseData.clear();
+    this->responseHeaderData.clear();
 
-    CURL* curl = this->connectionConfig->getCurl();
+    CURL* curl = this->curlHandle;
+
+    // Configure write callbacks to use our own buffers.
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &(this->responseData));
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curlHeaderCallback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &(this->responseHeaderData));
+
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+    if (getLogLevel() <= LL_TRACE) {
+      curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+      curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curlDebugCallback);
+    } else {
+      curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    }
 
     WriteLog(LL_DEBUG, "  Poll attempt " + std::to_string(pollCount) +
                        " | nextUri: " + this->nextUri);
 
-    // Build poll-specific headers
+    // Ensure auth is current before polling.
+    this->connectionConfig->refreshAuthIfNeeded();
+
+    // Build poll-specific headers.
     struct curl_slist* pollHeaders = nullptr;
-    for (const auto& pair : this->connectionConfig->getAuthHeaders()) {
+    for (auto pair : this->connectionConfig->getAuthHeaders()) {
       std::string h = pair.first + ": " + pair.second;
       pollHeaders = curl_slist_append(pollHeaders, h.c_str());
     }
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, pollHeaders);
-    // Force a clean GET with no body
+
+    // Force a clean GET with no body.
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 0L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
     curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, nullptr);
 
     CURLcode res = curl_easy_perform(curl);
 
@@ -272,10 +338,9 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     WriteLog(LL_DEBUG, "  Poll result: CURLcode=" + std::to_string(res) +
                        " HTTP=" + std::to_string(httpCode));
 
-    // Log response body on non-200 for debugging
     if (res == CURLE_OK && httpCode != 200) {
       WriteLog(LL_ERROR, "  Poll non-200 response body: " +
-                         this->connectionConfig->responseData);
+                         this->responseData);
     }
 
     UpdateStatus updateStatus;
@@ -287,7 +352,7 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
                    " (code " + std::to_string(res) + ")");
     }
 
-    // Free poll headers
+    // Free poll headers.
     if (pollHeaders) {
       curl_slist_free_all(pollHeaders);
       pollHeaders = nullptr;
@@ -314,6 +379,7 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
     pollCount++;
   }
 }
+
 /*
  Canceling a query causes it to gracefully stop.
  It may return a few more rows before finishing up,
@@ -326,19 +392,13 @@ void TrinoQuery::poll(TrinoQueryPollMode mode) {
 */
 void TrinoQuery::cancel() {
   if (this->partialCancelUri.size() > 0) {
-    CURL* curl = this->connectionConfig->getCurl();
+    CURL* curl = this->curlHandle;
     curl_easy_setopt(curl, CURLOPT_URL, this->partialCancelUri.c_str());
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 
     CURLcode res = curl_easy_perform(curl);
     UpdateStatus updateStatus;
     if (res == CURLE_OK) {
-      // There's nothing to parse from the result of the DELETE
-      // we sent to Trino, so the CURLE_OK means it was successful.
-      // However, we actually need to finish reading the data
-      // in order for Trino to mark the query as completed
-      // after canceling the query. Otherwise it remains stuck
-      // in the "FINISHING" state.
       WriteLog(LL_WARN, "Query Cancellation Sent. Polling to completion");
       this->poll(ToCompletion);
     }
@@ -351,17 +411,30 @@ void TrinoQuery::cancel() {
 */
 void TrinoQuery::terminate() {
   if (not this->getIsCompleted() and this->nextUri.size() > 0) {
-    CURL* curl = this->connectionConfig->getCurl();
+    CURL* curl = this->curlHandle;
     curl_easy_setopt(curl, CURLOPT_URL, this->nextUri.c_str());
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 
+    // Set auth headers for the DELETE request.
+    struct curl_slist* headers = nullptr;
+    for (auto pair : this->connectionConfig->getAuthHeaders()) {
+      std::string h = pair.first + ": " + pair.second;
+      headers = curl_slist_append(headers, h.c_str());
+    }
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
     CURLcode res = curl_easy_perform(curl);
+
+    // Free headers.
+    if (headers) {
+      curl_slist_free_all(headers);
+    }
+
+    // Reset custom request method.
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, nullptr);
+
     UpdateStatus updateStatus;
     if (res == CURLE_OK) {
-      // A success status on the terminate command means it
-      // was successful. There's nothing to read after.
-      // We can reset the statement in case someone tries
-      // to reuse it.
       WriteLog(LL_WARN, "Query Termination Sent. Resetting query object");
       this->reset();
       return;
@@ -372,8 +445,6 @@ void TrinoQuery::terminate() {
 }
 
 const int64_t TrinoQuery::getAbsoluteRowCount() const {
-  // The ODBC convention for row counts is that -1 represents
-  // an as-yet unknown number of rows.
   if (this->completed) {
     return this->getCurrentRowCount();
   } else {
@@ -382,11 +453,6 @@ const int64_t TrinoQuery::getAbsoluteRowCount() const {
 }
 
 const int64_t TrinoQuery::getCurrentRowCount() const {
-  // It can be useful to know how many rows are currently available.
-  // However, the offset position needs to be included in this value
-  // to provide the facade that the checkpointed rows that have
-  // been discarded from memory are still around. Add one to the
-  // offset position to turn it into a length/size.
   return (this->rowOffsetPosition + 1) + this->dataJson.size();
 }
 
@@ -394,9 +460,6 @@ const int16_t TrinoQuery::getColumnCount() {
   if (this->columnDescriptions.empty()) {
     this->poll(UntilColumnsLoaded);
   }
-  // Yes, precision is lost here. However, the maximum column
-  // count in a SQL query can be limited to a 16 bit integer
-  // without any risk to normal everyday tables.
   return static_cast<int16_t>(this->columnsJson.size());
 }
 
@@ -413,26 +476,18 @@ const bool TrinoQuery::getIsCompleted() const {
 
 void TrinoQuery::sideloadResponse(json artificialResponse) {
   /*
-   Most ODBC functions return a status code, not an actual result.
-   Also, ODBC is, at its heart, a protocol for reading results.
-   When an application or the driver manager needs to obtain
-   a result of any kind, it leverages the mechanisms to read data
-   as if it was a query, regardless of whether or not the data
-   actually comes from a database.
    The sideload method makes it easy to drop a response in
    that doesn't actually come from the database, such as
    the type information for supported types for the driver.
    */
-  this->connectionConfig->responseData = artificialResponse.dump();
+  this->responseData = artificialResponse.dump();
   this->updateSelfFromResponse();
 }
 
 /*
   Reset happens when an application wants to reuse a cursor with
   a different query. We need to clear out the results such that
-  this is ready to be reused. The connection information
-  can remain in place, as can the registered column change callback,
-  but all the query data and metadata needs to be reset.
+  this is ready to be reused.
 */
 void TrinoQuery::reset() {
   WriteLog(LL_TRACE, "  TrinoQuery is resetting");
@@ -449,6 +504,8 @@ void TrinoQuery::reset() {
   this->completed         = false;
   this->rowOffsetPosition = -1;
   this->odbcError         = std::nullopt;
+  this->responseData.clear();
+  this->responseHeaderData.clear();
 }
 
 void TrinoQuery::registerColumnDataChangeCallback(
@@ -460,38 +517,18 @@ const bool TrinoQuery::hasColumnData() const {
   return not this->columnDescriptions.empty();
 }
 
-/*
-  We don't want dataJson to grow without bounds, otherwise
-  we will run out of system memory on queries with lots of data.
-
-  The solution is to allow callers to checkpoint their current position.
-  This signals to the query that all rows have been read up to
-  and including the completedIndex and that any memory consumed
-  by those earlier rows can be freed.
-
-  You wouldn't want to call this too frequently, since it resizes
-  a vector and would be quite computationally expensive.
-*/
 void TrinoQuery::checkpointRowPosition(int64_t completedIndex) {
-  // Don't do anything if we try to checkpoint before any
-  // rows are read (index -1).
   if (completedIndex < 0) {
     return;
   }
-  // Get the position in dataJson that represents what has been
-  // completed already.
   int64_t dataJsonPosition = completedIndex;
   if (this->rowOffsetPosition > -1) {
     dataJsonPosition -= (this->rowOffsetPosition + 1);
   }
 
-  // Watch out for unsigned integer underflow in this comparison!
   if (dataJsonPosition == static_cast<int64_t>(dataJson.size()) - 1) {
-    // If we're erasing the whole thing, just clear it.
     dataJson.clear();
   } else {
-    // Otherwise, erase up to dataJsonPosition, being careful of the
-    // type of the offset for x86 vs x64 compilation.
     dataJson.erase(dataJson.begin(),
                    dataJson.begin() +
                        static_cast<std::vector<int64_t>::difference_type>(
@@ -500,12 +537,6 @@ void TrinoQuery::checkpointRowPosition(int64_t completedIndex) {
   this->rowOffsetPosition = completedIndex;
 }
 
-/*
-We need to hide the indexing into the dataJson vector
-so that we can implement the rowOffsetPosition offset. This
-gives callers the ability to track row offsets well beyond the
-number of rows that actually fit into memory from a query.
-*/
 const json& TrinoQuery::getRowAtIndex(int64_t index) const {
   if (this->rowOffsetPosition > -1) {
     return this->dataJson[static_cast<std::vector<json>::size_type>(

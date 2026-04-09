@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
+
+#include <curl/curl.h>
 
 #include "TrinoOdbcErrorHandler.hpp"
 #include "columnDescription.hpp"
@@ -25,12 +28,6 @@ enum TrinoQueryPollMode {
 
 // Need to allow a few tests access to private variables
 // in this class.
-// * MemoryReclamationTest needs to view the size of private
-//   collections to ensure memory is being reclaimed.
-// * FetchGetDataPerformanceTest and FetchBindPerformanceTest
-//   need to call poll(ToCompletion)
-// For all of these, we do a forward declaration here
-// and make this a friend class.
 class MemoryReclamationTest;
 class FetchGetDataPerformanceTest;
 class FetchBindPerformanceTest;
@@ -38,6 +35,13 @@ class FetchBindPerformanceTest;
 class TrinoQuery {
   private:
     ConnectionConfig* connectionConfig;
+    // Each query gets its own CURL handle to support parallel
+    // query execution across multiple statements.
+    CURL* curlHandle = nullptr;
+    // Per-query response buffers so parallel queries don't
+    // overwrite each other's data.
+    std::string responseData;
+    std::map<std::string, std::string> responseHeaderData;
     std::string query = "UNSET";
     std::string queryId;
     std::string infoUri;

@@ -23,9 +23,10 @@ class ConnectionConfig {
     std::unique_ptr<AuthConfig> authConfigPtr;
     std::vector<std::function<void(ConnectionConfig*)>> onDisconnectCallbacks;
 
-    // CURL is managed within the connection config. This way
-    // we can set up all the right headers and SSL options
-    // every time anything asks for a CURL handle.
+    // CURL handle used only for connection-level operations
+    // (auth refresh, server version check). Each TrinoQuery
+    // creates its own CURL handle for query execution to
+    // support parallel queries.
     CURL* curl;
 
   public:
@@ -38,7 +39,9 @@ class ConnectionConfig {
                      std::string clientSecret,
                      std::string oidcScope,
                      std::string grantType,
-                     std::string tokenEndpoint);
+                     std::string tokenEndpoint,
+                     std::string redirectUri      = "",
+                     unsigned short callbackPort  = 0);
 
     ~ConnectionConfig();
     std::string const getHostname();
@@ -52,6 +55,14 @@ class ConnectionConfig {
     void registerDisconnectCallback(std::function<void(ConnectionConfig*)> f);
     void unregisterDisconnectCallback(std::function<void(ConnectionConfig*)> f);
 
+    // Create a new independent CURL handle configured with the same
+    // SSL, compression, and timeout settings as the connection handle.
+    // Used by TrinoQuery to support parallel query execution.
+    CURL* createQueryCurlHandle();
+
+    // Ensure auth token is valid. Call before using auth headers.
+    void refreshAuthIfNeeded();
+
     // Making these public because they're frequently accessed and
     // manipulated external to the ConnectionConfig object
     std::string responseData;
@@ -59,4 +70,8 @@ class ConnectionConfig {
     std::map<std::string, std::string> getAuthHeaders() {
       return this->authConfigPtr->headers;
     }
+
+    // Default catalog and schema for narrowing metadata queries.
+    std::string defaultCatalog = "";
+    std::string defaultSchema  = "";
 };

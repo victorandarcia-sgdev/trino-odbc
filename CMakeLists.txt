@@ -1,4 +1,4 @@
-﻿# CMakeList.txt : CMake project for TrinoODBC, include source and define
+# CMakeList.txt : CMake project for TrinoODBC, include source and define
 # project specific logic here.
 #
 cmake_minimum_required (VERSION 3.14)
@@ -34,6 +34,7 @@ add_library(TrinoODBC SHARED
             "src/trinoAPIWrapper/authProvider/noAuthProvider.cpp"
             "src/trinoAPIWrapper/authProvider/tokenCacheAuthProviderBase.cpp"
             "src/trinoAPIWrapper/authProvider/deviceFlowAuthProvider.cpp"
+            "src/trinoAPIWrapper/authProvider/oidcAuthCodeProvider.cpp"
             "src/trinoAPIWrapper/trinoQuery.cpp"
             "src/trinoAPIWrapper/connectionConfig.cpp"
             "src/trinoAPIWrapper/environmentConfig.cpp"
@@ -129,7 +130,8 @@ target_link_libraries(TrinoODBC PRIVATE CURL::libcurl)
 # odbccp32 has linker errors that can be resolved by including the
 # legacy_stdio_defnitions library.
 # https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-error-lnk2019
-target_link_libraries(TrinoODBC PRIVATE odbccp32 crypt32 legacy_stdio_definitions)
+# ws2_32 is required for Winsock2 (used by the OIDC Auth Code callback server).
+target_link_libraries(TrinoODBC PRIVATE odbccp32 crypt32 ws2_32 legacy_stdio_definitions)
 
 # We want to be able to write unit tests with gtest
 enable_testing()

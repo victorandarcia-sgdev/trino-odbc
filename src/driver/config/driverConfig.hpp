@@ -27,6 +27,10 @@ class DriverConfig {
     std::string oidcScope        = "";
     std::string tokenEndpoint    = "";
     std::string grantType        = "";
+    std::string redirectUri      = "";
+    uint16_t callbackPort        = 0;
+    std::string defaultCatalog   = "";
+    std::string defaultSchema    = "";
 
     // Metadata describing the status of this config object.
     bool isSaved = false;
@@ -76,6 +80,19 @@ class DriverConfig {
 
     std::string getGrantType();
     void setGrantType(std::string grantType);
+
+    std::string getRedirectUri();
+    void setRedirectUri(std::string redirectUri);
+
+    std::string getCallbackPortStr();
+    uint16_t getCallbackPortNum();
+    void setCallbackPort(std::string callbackPort);
+    void setCallbackPort(uint16_t callbackPort);
+    std::string getDefaultCatalog();
+    void setDefaultCatalog(std::string defaultCatalog);
+
+    std::string getDefaultSchema();
+    void setDefaultSchema(std::string defaultSchema);
 
     std::string serialize();
     static DriverConfig deserialize(const std::string& jsonStr);

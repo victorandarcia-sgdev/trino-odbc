@@ -28,25 +28,38 @@ std::map<std::string, LogLevel> LOG_NAME_TO_LOG_LEVEL = {
 };
 
 std::vector<std::string> AUTH_METHOD_NAMES = {
-    "No Auth", "External Auth", "OIDC Client Cred Auth", "Device Flow"};
+    "No Auth",
+    "External Auth",
+    "OIDC Client Cred Auth",
+    "Device Flow",
+    "OIDC Auth Code",
+    "OIDC Auto"};
 
 std::vector<ApiAuthMethod> AUTH_METHOD_VALUES = {
-    AM_NO_AUTH, AM_EXTERNAL_AUTH, AM_CLIENT_CRED_AUTH, AM_DEVICE_FLOW};
+    AM_NO_AUTH,
+    AM_EXTERNAL_AUTH,
+    AM_CLIENT_CRED_AUTH,
+    AM_DEVICE_FLOW,
+    AM_OIDC_AUTH_CODE,
+    AM_OIDC_AUTO};
 
 std::map<ApiAuthMethod, std::string> AUTH_METHOD_TO_AUTH_NAME = {
     std::make_pair(AM_NO_AUTH, "No Auth"),
     std::make_pair(AM_EXTERNAL_AUTH, "External Auth"),
     std::make_pair(AM_CLIENT_CRED_AUTH, "OIDC Client Cred Auth"),
-    std::make_pair(AM_DEVICE_FLOW, "Device Flow")};
+    std::make_pair(AM_DEVICE_FLOW, "Device Flow"),
+    std::make_pair(AM_OIDC_AUTH_CODE, "OIDC Auth Code"),
+    std::make_pair(AM_OIDC_AUTO, "OIDC Auto")};
 
 std::map<std::string, ApiAuthMethod> AUTH_NAME_TO_AUTH_METHOD = {
     std::make_pair("No Auth", AM_NO_AUTH),
     std::make_pair("External Auth", AM_EXTERNAL_AUTH),
     std::make_pair("Oidc Client Cred Auth", AM_CLIENT_CRED_AUTH),
-    std::make_pair("Device Flow", AM_DEVICE_FLOW)};
+    std::make_pair("Device Flow", AM_DEVICE_FLOW),
+    std::make_pair("Oidc Auth Code", AM_OIDC_AUTH_CODE),
+    std::make_pair("Oidc Auto", AM_OIDC_AUTO)};
 
 
-// All default values - do not miss any!
 std::map<std::string, std::string> DRIVER_CONFIG_DEFAULT_VALUES = {
     std::make_pair("hostname", "localhost"),
     std::make_pair("port", "8080"),
@@ -57,7 +70,11 @@ std::map<std::string, std::string> DRIVER_CONFIG_DEFAULT_VALUES = {
     std::make_pair("clientSecret", ""),
     std::make_pair("oidcScope", ""),
     std::make_pair("secretEncryptionLevel", "user"),
-};
+    std::make_pair("redirectUri", ""),
+    std::make_pair("callbackPort", "8890"),
+    std::make_pair("defaultCatalog", ""),
+    std::make_pair("defaultSchema", ""),
+  };
 
 // DSN
 std::string DriverConfig::getDSN() {
@@ -83,7 +100,7 @@ void DriverConfig::setHostname(std::string hostname) {
   this->hostname = hostname;
 }
 
-// Port - Accepts and returns both integers and strings.
+// Port
 std::string DriverConfig::getPortStr() {
   return std::to_string(this->port);
 }
@@ -159,6 +176,7 @@ void DriverConfig::setOidcScope(std::string oidcScope) {
   this->oidcScope = oidcScope;
 }
 
+// Token Endpoint
 std::string DriverConfig::getTokenEndpoint() {
   return this->tokenEndpoint;
 }
@@ -166,11 +184,54 @@ void DriverConfig::setTokenEndpoint(std::string tokenEndpoint) {
   this->tokenEndpoint = tokenEndpoint;
 }
 
+// Grant Type
 std::string DriverConfig::getGrantType() {
   return this->grantType;
 }
 void DriverConfig::setGrantType(std::string grantType) {
   this->grantType = grantType;
+}
+
+// Redirect URI
+std::string DriverConfig::getRedirectUri() {
+  return this->redirectUri;
+}
+void DriverConfig::setRedirectUri(std::string redirectUri) {
+  this->redirectUri = redirectUri;
+}
+
+// Callback Port
+std::string DriverConfig::getCallbackPortStr() {
+  return std::to_string(this->callbackPort);
+}
+uint16_t DriverConfig::getCallbackPortNum() {
+  return this->callbackPort;
+}
+void DriverConfig::setCallbackPort(std::string callbackPort) {
+  if (callbackPort.empty()) {
+    this->callbackPort = 8890;
+  } else {
+    this->callbackPort = static_cast<uint16_t>(std::stoi(callbackPort));
+  }
+}
+void DriverConfig::setCallbackPort(uint16_t callbackPort) {
+  this->callbackPort = callbackPort;
+}
+
+// Default Catalog
+std::string DriverConfig::getDefaultCatalog() {
+  return this->defaultCatalog;
+}
+void DriverConfig::setDefaultCatalog(std::string defaultCatalog) {
+  this->defaultCatalog = defaultCatalog;
+}
+
+// Default Schema
+std::string DriverConfig::getDefaultSchema() {
+  return this->defaultSchema;
+}
+void DriverConfig::setDefaultSchema(std::string defaultSchema) {
+  this->defaultSchema = defaultSchema;
 }
 
 // IsSaved
@@ -239,6 +300,30 @@ DriverConfig driverConfigFromKVPs(std::map<std::string, std::string> kvps) {
   if (kvps.count("tokenendpoint")) {
     config.setTokenEndpoint(kvps.at("tokenendpoint"));
   }
+  if (kvps.count("redirectUri")) {
+    config.setRedirectUri(kvps.at("redirectUri"));
+  }
+  if (kvps.count("redirecturi")) {
+    config.setRedirectUri(kvps.at("redirecturi"));
+  }
+  if (kvps.count("callbackPort")) {
+    config.setCallbackPort(kvps.at("callbackPort"));
+  }
+  if (kvps.count("callbackport")) {
+    config.setCallbackPort(kvps.at("callbackport"));
+  }
+  if (kvps.count("defaultCatalog")) {
+    config.setDefaultCatalog(kvps.at("defaultCatalog"));
+  }
+  if (kvps.count("defaultcatalog")) {
+    config.setDefaultCatalog(kvps.at("defaultcatalog"));
+  }
+  if (kvps.count("defaultSchema")) {
+    config.setDefaultSchema(kvps.at("defaultSchema"));
+  }
+  if (kvps.count("defaultschema")) {
+    config.setDefaultSchema(kvps.at("defaultschema"));
+  }
 
   return config;
 }
@@ -276,6 +361,24 @@ std::map<std::string, std::string> driverConfigToKVPs(DriverConfig config) {
   }
   if (!config.getOidcScope().empty()) {
     kvps["oidcScope"] = config.getOidcScope();
+  }
+  if (!config.getRedirectUri().empty()) {
+    kvps["redirectUri"] = config.getRedirectUri();
+  }
+  if (config.getCallbackPortNum() > 0) {
+    kvps["callbackPort"] = config.getCallbackPortStr();
+  }
+  if (!config.getTokenEndpoint().empty()) {
+    kvps["tokenendpoint"] = config.getTokenEndpoint();
+  }
+  if (!config.getGrantType().empty()) {
+    kvps["granttype"] = config.getGrantType();
+  }
+  if (!config.getDefaultCatalog().empty()) {
+    kvps["defaultCatalog"] = config.getDefaultCatalog();
+  }
+  if (!config.getDefaultSchema().empty()) {
+    kvps["defaultSchema"] = config.getDefaultSchema();
   }
 
   return kvps;

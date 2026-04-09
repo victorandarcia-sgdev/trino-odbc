@@ -31,11 +31,42 @@ SQLRETURN SQL_API SQLSetStmtAttr(SQLHSTMT StatementHandle,
       statement->fetchPollMode = static_cast<TrinoQueryPollMode>(pollModeInt);
       break;
     }
+    case SQL_ATTR_QUERY_TIMEOUT: { // 0
+      // Report Server sets query timeout. Accept but ignore.
+      WriteLog(LL_TRACE, "  Query timeout requested (accepted, not enforced)");
+      break;
+    }
+    case SQL_ATTR_MAX_ROWS: { // 1
+      // Accept but ignore max rows limit.
+      WriteLog(LL_TRACE, "  Max rows requested (accepted, not enforced)");
+      break;
+    }
+    case SQL_ATTR_NOSCAN: { // 2
+      // Accept but ignore - controls escape clause scanning.
+      break;
+    }
+    case SQL_ATTR_MAX_LENGTH: { // 3
+      // Accept but ignore.
+      break;
+    }
+    case SQL_ATTR_CURSOR_TYPE: { // 6
+      // Only forward-only cursors supported. Accept silently.
+      break;
+    }
+    case SQL_ATTR_CONCURRENCY: { // 7
+      // Read-only concurrency. Accept silently.
+      break;
+    }
+    case SQL_ATTR_METADATA_ID: { // 10014
+      // Controls whether catalog function args are identifiers.
+      // Accept but ignore.
+      break;
+    }
     default: {
-      WriteLog(LL_ERROR,
-               "  ERROR: Attribute " + std::to_string(Attribute) +
-                   " is not implemented");
-      return SQL_ERROR;
+      WriteLog(LL_WARN,
+               "  WARNING: Attribute " + std::to_string(Attribute) +
+                   " is not implemented - returning success with info");
+      return SQL_SUCCESS_WITH_INFO;
     }
   }
 

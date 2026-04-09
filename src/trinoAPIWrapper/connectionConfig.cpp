@@ -8,6 +8,7 @@
 #include "authProvider/deviceFlowAuthProvider.hpp"
 #include "authProvider/externalAuthProvider.hpp"
 #include "authProvider/noAuthProvider.hpp"
+#include "authProvider/oidcAuthCodeProvider.hpp"
 
 
 using json = nlohmann::json;
@@ -43,6 +44,60 @@ curlHeaderCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
   return nitems * size;
 }
 
+/**
+ * Determines whether the current process can display interactive UI.
+ *
+ * Returns false when running as:
+ * - A Windows Service (Power BI Report Server, SSRS, SQL Agent)
+ * - A non-interactive session (scheduled tasks, system accounts)
+ *
+ * Returns true when running as:
+ * - Power BI Desktop
+ * - Excel
+ * - DBeaver
+ * - Any interactive desktop application
+ */
+static bool canDisplayInteractiveUI() {
+  // Check if the process window station allows user interaction.
+  HWINSTA hWinStation = GetProcessWindowStation();
+  if (hWinStation != nullptr) {
+    USEROBJECTFLAGS uof = {};
+    if (GetUserObjectInformation(
+            hWinStation, UOI_FLAGS, &uof, sizeof(uof), nullptr)) {
+      if (!(uof.dwFlags & WSF_VISIBLE)) {
+        WriteLog(LL_DEBUG,
+                 "  canDisplayInteractiveUI: Window station not visible "
+                 "(service/non-interactive)");
+        return false;
+      }
+    }
+  }
+
+  // Services run in session 0 on modern Windows (Vista+).
+  DWORD sessionId = 0;
+  if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId)) {
+    if (sessionId == 0) {
+      WriteLog(LL_DEBUG,
+               "  canDisplayInteractiveUI: Session 0 detected (service)");
+      return false;
+    }
+  }
+
+  // Check that we can access an input desktop.
+  HDESK hDesktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+  if (hDesktop == nullptr) {
+    WriteLog(LL_DEBUG,
+             "  canDisplayInteractiveUI: Cannot open input desktop "
+             "(non-interactive)");
+    return false;
+  }
+  CloseDesktop(hDesktop);
+
+  WriteLog(LL_DEBUG,
+           "  canDisplayInteractiveUI: Interactive session confirmed");
+  return true;
+}
+
 ConnectionConfig::ConnectionConfig(std::string hostname,
                                    unsigned short port,
                                    ApiAuthMethod authMethod,
@@ -52,7 +107,9 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                    std::string clientSecret,
                                    std::string oidcScope,
                                    std::string grantType,
-                                   std::string tokenEndpoint) {
+                                   std::string tokenEndpoint,
+                                   std::string redirectUri,
+                                   unsigned short callbackPort) {
 
   this->hostname       = hostname;
   this->port           = port;
@@ -99,6 +156,72 @@ ConnectionConfig::ConnectionConfig(std::string hostname,
                                                       oidcScope);
       break;
     }
+    case AM_OIDC_AUTH_CODE: {
+      this->authConfigPtr = getOidcAuthCodeProvider(hostname,
+                                                     port,
+                                                     connectionName,
+                                                     oidcDiscoveryUrl,
+                                                     clientId,
+                                                     clientSecret,
+                                                     oidcScope,
+                                                     tokenEndpoint,
+                                                     redirectUri,
+                                                     callbackPort);
+      break;
+    }
+    case AM_OIDC_AUTO: {
+      bool hasClientSecret = !clientSecret.empty();
+      bool canShowUI       = canDisplayInteractiveUI();
+
+      if (hasClientSecret && !canShowUI) {
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: Headless environment detected with client "
+                 "secret present. Using Client Credentials flow.");
+        this->authConfigPtr = getClientCredAuthProvider(hostname,
+                                                        port,
+                                                        connectionName,
+                                                        oidcDiscoveryUrl,
+                                                        clientId,
+                                                        clientSecret,
+                                                        oidcScope,
+                                                        grantType,
+                                                        tokenEndpoint);
+      } else if (canShowUI) {
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: Interactive environment detected. "
+                 "Using Authorization Code + PKCE flow.");
+        this->authConfigPtr = getOidcAuthCodeProvider(hostname,
+                                                       port,
+                                                       connectionName,
+                                                       oidcDiscoveryUrl,
+                                                       clientId,
+                                                       clientSecret,
+                                                       oidcScope,
+                                                       tokenEndpoint,
+                                                       redirectUri,
+                                                       callbackPort);
+      } else if (hasClientSecret) {
+        WriteLog(LL_INFO,
+                 "  OIDC Auto: No UI available but client secret present. "
+                 "Using Client Credentials flow.");
+        this->authConfigPtr = getClientCredAuthProvider(hostname,
+                                                        port,
+                                                        connectionName,
+                                                        oidcDiscoveryUrl,
+                                                        clientId,
+                                                        clientSecret,
+                                                        oidcScope,
+                                                        grantType,
+                                                        tokenEndpoint);
+      } else {
+        WriteLog(LL_ERROR,
+                 "  ERROR: OIDC Auto mode cannot determine auth strategy. "
+                 "No client secret for headless mode and no UI available "
+                 "for interactive mode. Provide a clientSecret or run in "
+                 "an interactive session.");
+      }
+      break;
+    }
 
     default: {
       WriteLog(LL_ERROR,
@@ -129,16 +252,74 @@ std::string const ConnectionConfig::getStatementUrl() {
   return (this->hostname) + ":" + std::to_string(port) + "/v1/statement";
 }
 
+CURL* ConnectionConfig::createQueryCurlHandle() {
+  CURL* handle = curl_easy_init();
+  if (!handle) {
+    WriteLog(LL_ERROR, "  ERROR: Failed to create CURL handle for query");
+    return nullptr;
+  }
+
+  // SSL configuration matching the connection handle.
+  curl_easy_setopt(
+      handle, CURLOPT_SSL_OPTIONS,
+      CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
+
+  // Connection reuse within this handle's lifetime.
+  curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 0L);
+  curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
+
+  // Timeout matching the connection handle.
+  curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, 60000);
+
+  // Compression support.
+  curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+
+  return handle;
+}
+
+void ConnectionConfig::refreshAuthIfNeeded() {
+  if (this->authConfigPtr->isExpired()) {
+    WriteLog(LL_TRACE,
+             "  Detected expired authentication. Reauthenticating...");
+    // Ensure the connection CURL handle exists for auth refresh.
+    if (this->curl == nullptr) {
+      this->curl = curl_easy_init();
+      curl_easy_setopt(
+          this->curl, CURLOPT_SSL_OPTIONS,
+          CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
+      curl_easy_setopt(this->curl, CURLOPT_TIMEOUT_MS, 60000);
+      curl_easy_setopt(
+          this->curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+      curl_easy_setopt(
+          this->curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
+      curl_easy_setopt(
+          this->curl, CURLOPT_WRITEDATA, &(this->responseData));
+      curl_easy_setopt(
+          this->curl, CURLOPT_HEADERFUNCTION, curlHeaderCallback);
+      curl_easy_setopt(
+          this->curl, CURLOPT_HEADERDATA, &(this->responseHeaderData));
+    }
+    this->responseData.clear();
+    this->responseHeaderData.clear();
+    this->authConfigPtr->refresh(
+        this->curl, &(this->responseData), &(this->responseHeaderData));
+  }
+}
+
 CURL* ConnectionConfig::getCurl() {
   /*
   Return a curl handle, reset it if needed, and it's ready to go.
+  This is used for connection-level operations like auth refresh
+  and server version checks. Query execution uses per-statement
+  CURL handles created by createQueryCurlHandle().
   */
   if (this->curl == nullptr) {
     this->curl = curl_easy_init();
     // We always want to use SSL.
-    curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA| CURLSSLOPT_NO_REVOKE);
-    curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 1L);
-    curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 1L);
+    curl_easy_setopt(this->curl, CURLOPT_SSL_OPTIONS,
+                     CURLSSLOPT_NATIVE_CA | CURLSSLOPT_NO_REVOKE);
+    curl_easy_setopt(this->curl, CURLOPT_FRESH_CONNECT, 0L);
+    curl_easy_setopt(this->curl, CURLOPT_FORBID_REUSE, 0L);
     // We want to save the response body in a string using a callback.
     curl_easy_setopt(this->curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, &(this->responseData));
@@ -158,33 +339,20 @@ curlSetup:
   // Clear the previous response headers as well
   this->responseHeaderData.clear();
 
-  // We could do a full reset here, but that seems to slow the driver
-  // down considerably. Better to just reset a few things and
-  // otherwise reuse the curl handle.
-  // curl_easy_reset(this->curl);
-
-  // Let's say the standard state of curl is that the
-  // handle is configured to run GET requests, no matter
-  // how it was used before.
   curl_easy_setopt(this->curl, CURLOPT_HTTPGET, 1L);
   curl_easy_setopt(this->curl, CURLOPT_POST, 0L);
-
-  
-  // This clears any previously set POST body,
-  // ensuring the request is actually sent as GET.
-  // Without this, libcurl sees the old POSTFIELDS
-  // and sends POST even though HTTPGET was set.
   curl_easy_setopt(this->curl, CURLOPT_POSTFIELDS, nullptr);
-
-
-  // Also reset any custom request method (DELETE, etc.)
   curl_easy_setopt(this->curl, CURLOPT_CUSTOMREQUEST, nullptr);
 
   // Set up any required headers if needed.
   if (this->authConfigPtr->headers.size() > 0) {
     struct curl_slist* headers = nullptr;
-    for (const auto pair : this->authConfigPtr->headers) {
-      WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " + pair.second.substr(0, 50));
+    bool shouldLog = getLogLevel() <= LL_DEBUG;
+    for (auto pair : this->authConfigPtr->headers) {
+      if (shouldLog) {
+        WriteLog(LL_DEBUG, "  Setting header: " + pair.first + ": " +
+                           pair.second.substr(0, 50));
+      }
       std::string nextHeader = pair.first + ": " + pair.second;
       headers                = curl_slist_append(headers, nextHeader.c_str());
     }
@@ -192,8 +360,7 @@ curlSetup:
   }
 
   // Now that we have a fully configured CURL handle, check if we need to do
-  // any required auth steps. We may need to use the configured handle to
-  // perform the authentication.
+  // any required auth steps.
   if (this->authConfigPtr->isExpired()) {
     WriteLog(LL_TRACE,
              "  Detected expired authentication. Reauthenticating...");

@@ -25,6 +25,14 @@ constexpr int ID_STATIC_OIDC_DISC     = 112;
 constexpr int ID_STATIC_CLIENT_ID     = 113;
 constexpr int ID_STATIC_CLIENT_SECRET = 114;
 constexpr int ID_STATIC_OIDC_SCOPE    = 115;
+constexpr int ID_EDIT_CALLBACK_PORT   = 116;
+constexpr int ID_STATIC_CALLBACK_PORT = 117;
+constexpr int ID_EDIT_TOKEN_EP        = 118;
+constexpr int ID_STATIC_TOKEN_EP      = 119;
+constexpr int ID_EDIT_DEF_CATALOG     = 120;
+constexpr int ID_STATIC_DEF_CATALOG   = 121;
+constexpr int ID_EDIT_DEF_SCHEMA      = 122;
+constexpr int ID_STATIC_DEF_SCHEMA    = 123;
 constexpr int BUF_LEN                 = 1024;
 
 
@@ -60,6 +68,32 @@ DSNForm::DSNForm(HWND parent, std::map<std::string, std::string> attributes) {
   if (attributes.count("oidcScope") > 0) {
     this->configResult.setOidcScope(attributes.at("oidcScope"));
   }
+  if (attributes.count("callbackPort") > 0) {
+    this->configResult.setCallbackPort(attributes.at("callbackPort"));
+  }
+  if (attributes.count("tokenendpoint") > 0) {
+    this->configResult.setTokenEndpoint(attributes.at("tokenendpoint"));
+  }
+  if (attributes.count("defaultCatalog") > 0) {
+    this->configResult.setDefaultCatalog(attributes.at("defaultCatalog"));
+  }
+  if (attributes.count("defaultSchema") > 0) {
+    this->configResult.setDefaultSchema(attributes.at("defaultSchema"));
+  }
+}
+
+// Returns true for auth methods that need the OIDC configuration fields.
+static bool authMethodNeedsOidc(const std::string& authMethod) {
+  return authMethod == "OIDC Client Cred Auth" ||
+         authMethod == "OIDC Auth Code" ||
+         authMethod == "OIDC Auto" ||
+         authMethod == "Device Flow";
+}
+
+// Returns true for auth methods that need the callback port field.
+static bool authMethodNeedsCallbackPort(const std::string& authMethod) {
+  return authMethod == "OIDC Auth Code" ||
+         authMethod == "OIDC Auto";
 }
 
 
@@ -94,6 +128,12 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
       HWND clientSecretLabel     = GetDlgItem(hwnd, ID_STATIC_CLIENT_SECRET);
       HWND oidcScopeItem         = GetDlgItem(hwnd, ID_EDIT_OIDC_SCOPE);
       HWND oidcScopeLabel        = GetDlgItem(hwnd, ID_STATIC_OIDC_SCOPE);
+      HWND callbackPortItem      = GetDlgItem(hwnd, ID_EDIT_CALLBACK_PORT);
+      HWND callbackPortLabel     = GetDlgItem(hwnd, ID_STATIC_CALLBACK_PORT);
+      HWND tokenEndpointItem     = GetDlgItem(hwnd, ID_EDIT_TOKEN_EP);
+      HWND tokenEndpointLabel    = GetDlgItem(hwnd, ID_STATIC_TOKEN_EP);
+      HWND defaultCatalogItem    = GetDlgItem(hwnd, ID_EDIT_DEF_CATALOG);
+      HWND defaultSchemaItem     = GetDlgItem(hwnd, ID_EDIT_DEF_SCHEMA);
       char buf[BUF_LEN]          = {0};
       switch (LOWORD(wParam)) {
         case ID_BUTTON_SAVE: {
@@ -137,6 +177,27 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
           GetWindowText(oidcScopeItem, buf, BUF_LEN);
           driverConfigPtr->setOidcScope(std::string(buf));
 
+          // Handle the Callback Port
+          GetWindowText(callbackPortItem, buf, BUF_LEN);
+          std::string cbPortStr(buf);
+          if (cbPortStr != NOT_REQUIRED && !cbPortStr.empty()) {
+            driverConfigPtr->setCallbackPort(cbPortStr);
+          }
+
+          // Handle the Token Endpoint
+          GetWindowText(tokenEndpointItem, buf, BUF_LEN);
+          std::string tokenEpStr(buf);
+          if (tokenEpStr != NOT_REQUIRED) {
+            driverConfigPtr->setTokenEndpoint(tokenEpStr);
+          }
+          // Handle the Default Catalog
+          GetWindowText(defaultCatalogItem, buf, BUF_LEN);
+          driverConfigPtr->setDefaultCatalog(std::string(buf));
+
+          // Handle the Default Schema
+          GetWindowText(defaultSchemaItem, buf, BUF_LEN);
+          driverConfigPtr->setDefaultSchema(std::string(buf));
+
           driverConfigPtr->setIsSaved(true);
 
           DestroyWindow(hwnd);
@@ -154,8 +215,9 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
           LRESULT authIndex = SendMessage(authMethodItem, CB_GETCURSEL, 0, 0);
           SendMessage(authMethodItem, CB_GETLBTEXT, authIndex, (LPARAM)buf);
           std::string authMethod = stringFromChar(buf, CHAR_IS_NTS);
-          if (authMethod == "OIDC Client Cred Auth") {
-            WriteLog(LL_TRACE, "  Client Cred Auth");
+
+          if (authMethodNeedsOidc(authMethod)) {
+            WriteLog(LL_TRACE, "  OIDC-based Auth method selected");
             // Show the OIDC Config fields
             if (getEditText(oidcDiscoveryUrlItem) == NOT_REQUIRED) {
               setEditText(oidcDiscoveryUrlItem, "");
@@ -173,9 +235,30 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
               setEditText(oidcScopeItem, "");
             }
             setEditWriteable(oidcScopeItem);
+
+            // Token endpoint is always editable for OIDC methods
+            if (getEditText(tokenEndpointItem) == NOT_REQUIRED) {
+              setEditText(tokenEndpointItem, "");
+            }
+            setEditWriteable(tokenEndpointItem);
+
+            // Show/hide callback port based on whether this auth
+            // method uses the authorization code flow.
+            if (authMethodNeedsCallbackPort(authMethod)) {
+              if (getEditText(callbackPortItem) == NOT_REQUIRED) {
+                setEditText(callbackPortItem, "8890");
+              }
+              setEditWriteable(callbackPortItem);
+            } else {
+              if (getEditText(callbackPortItem) != NOT_REQUIRED) {
+                setEditText(callbackPortItem, NOT_REQUIRED);
+              }
+              setEditReadOnly(callbackPortItem);
+            }
+
             InvalidateRect(hwnd, NULL, FALSE);
           } else if (not authMethod.empty()) {
-            WriteLog(LL_TRACE, "  Other Auth");
+            WriteLog(LL_TRACE, "  Non-OIDC Auth method selected");
             // Hide the OIDC Config fields
             if (getEditText(oidcDiscoveryUrlItem) == "") {
               setEditText(oidcDiscoveryUrlItem, NOT_REQUIRED);
@@ -193,6 +276,14 @@ LRESULT CALLBACK WINDOW_CB(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
               setEditText(oidcScopeItem, NOT_REQUIRED);
             }
             setEditReadOnly(oidcScopeItem);
+            if (getEditText(callbackPortItem) != NOT_REQUIRED) {
+              setEditText(callbackPortItem, NOT_REQUIRED);
+            }
+            setEditReadOnly(callbackPortItem);
+            if (getEditText(tokenEndpointItem) == "") {
+              setEditText(tokenEndpointItem, NOT_REQUIRED);
+            }
+            setEditReadOnly(tokenEndpointItem);
             InvalidateRect(hwnd, NULL, FALSE);
           }
           break;
@@ -235,7 +326,7 @@ void DSNForm::ShowDSNForm() {
                              CW_USEDEFAULT,
                              CW_USEDEFAULT,
                              625,
-                             400,
+                             530,
                              this->parent,
                              NULL,
                              GetModuleHandle(NULL),
@@ -252,18 +343,26 @@ void DSNForm::ShowDSNForm() {
   labelMaker(form, 100, NULL, "Log Level:", visible);
   labelMaker(form, 130, NULL, "Auth Method:", visible);
   labelMaker(form, 160, ID_STATIC_OIDC_DISC, "OIDC Discovery URL:", oidcVis);
-  labelMaker(form, 190, ID_STATIC_CLIENT_ID, "Client ID:", oidcVis);
-  labelMaker(form, 220, ID_STATIC_CLIENT_SECRET, "Client Secret:", oidcVis);
-  labelMaker(form, 250, ID_STATIC_OIDC_SCOPE, "OIDC Scope:", oidcVis);
+  labelMaker(form, 190, ID_STATIC_TOKEN_EP, "Token Endpoint:", oidcVis);
+  labelMaker(form, 220, ID_STATIC_CLIENT_ID, "Client ID:", oidcVis);
+  labelMaker(form, 250, ID_STATIC_CLIENT_SECRET, "Client Secret:", oidcVis);
+  labelMaker(form, 280, ID_STATIC_OIDC_SCOPE, "OIDC Scope:", oidcVis);
+  labelMaker(form, 310, ID_STATIC_CALLBACK_PORT, "Callback Port:", oidcVis);
+  labelMaker(form, 340, ID_STATIC_DEF_CATALOG, "Default Catalog:", visible);
+  labelMaker(form, 370, ID_STATIC_DEF_SCHEMA, "Default Schema:", visible);
 
   WriteLog(LL_TRACE, "  Creating Text Entries");
   HWND hwndDsn              = editMaker(form, 10, ID_EDIT_DSN, visible);
   HWND hwndHostname         = editMaker(form, 40, ID_EDIT_HOSTNAME, visible);
   HWND hwndPort             = editMaker(form, 70, ID_EDIT_PORT, visible);
   HWND hwndOidcDiscoveryUrl = editMaker(form, 160, ID_EDIT_OIDC_DISC, oidcVis);
-  HWND hwndClientId         = editMaker(form, 190, ID_EDIT_CLIENT_ID, oidcVis);
-  HWND hwndClientSecret = editMaker(form, 220, ID_EDIT_CLIENT_SECRET, oidcVis);
-  HWND hwndOidcScope    = editMaker(form, 250, ID_EDIT_OIDC_SCOPE, oidcVis);
+  HWND hwndTokenEndpoint    = editMaker(form, 190, ID_EDIT_TOKEN_EP, oidcVis);
+  HWND hwndClientId         = editMaker(form, 220, ID_EDIT_CLIENT_ID, oidcVis);
+  HWND hwndClientSecret     = editMaker(form, 250, ID_EDIT_CLIENT_SECRET, oidcVis);
+  HWND hwndOidcScope        = editMaker(form, 280, ID_EDIT_OIDC_SCOPE, oidcVis);
+  HWND hwndCallbackPort     = editMaker(form, 310, ID_EDIT_CALLBACK_PORT, oidcVis);
+  HWND hwndDefaultCatalog   = editMaker(form, 340, ID_EDIT_DEF_CATALOG, visible);
+  HWND hwndDefaultSchema    = editMaker(form, 370, ID_EDIT_DEF_SCHEMA, visible);
 
   // Sometimes the DSN should be read-only such as when an existing DSN is being
   // configured. In those cases, we need to set the EDIT control to readonly as
@@ -285,17 +384,21 @@ void DSNForm::ShowDSNForm() {
   setEditText(hwndHostname, this->configResult.getHostname());
   setEditText(hwndPort, this->configResult.getPortStr());
   setEditText(hwndOidcDiscoveryUrl, this->configResult.getOidcDiscoveryUrl());
+  setEditText(hwndTokenEndpoint, this->configResult.getTokenEndpoint());
   setEditText(hwndClientId, this->configResult.getClientId());
   setEditText(hwndClientSecret, this->configResult.getClientSecret());
   setEditText(hwndOidcScope, this->configResult.getOidcScope());
+  setEditText(hwndCallbackPort, this->configResult.getCallbackPortStr());
+  setEditText(hwndDefaultCatalog, this->configResult.getDefaultCatalog());
+  setEditText(hwndDefaultSchema, this->configResult.getDefaultSchema());
 
   WriteLog(LL_TRACE, "  Pre-poplating Comboboxes");
   setCombobox(hwndLogLevel, this->configResult.getLogLevelStr());
   setCombobox(hwndAuthMethod, this->configResult.getAuthMethodStr());
 
   WriteLog(LL_TRACE, "  Creating Buttons");
-  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save");
-  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel");
+  HWND hwndSave   = buttonMaker(form, 160, ID_BUTTON_SAVE, "Save", 420);
+  HWND hwndCancel = buttonMaker(form, 260, ID_BUTTON_CANCEL, "Cancel", 420);
 
   MSG msg = {};
   WriteLog(LL_TRACE, "  Polling...");

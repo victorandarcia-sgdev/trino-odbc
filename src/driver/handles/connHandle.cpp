@@ -40,7 +40,12 @@ void Connection::configure(DriverConfig config) {
                                                 config.getClientSecret(),
                                                 config.getOidcScope(),
                                                 config.getGrantType(),
-                                                config.getTokenEndpoint());
+                                                config.getTokenEndpoint(),
+                                                config.getRedirectUri(),
+                                                config.getCallbackPortNum());
+  //Store default catalog and schema for metadata query filtering
+  this->connectionConfig->defaultCatalog = config.getDefaultCatalog();
+  this->connectionConfig->defaultSchema  = config.getDefaultSchema();
 }
 
 void Connection::setError(ErrorInfo errorInfo) {
